@@ -26,4 +26,6 @@ Memorizzazione sicura di dati di carte di pagamento per uso personale (non elabo
 
 ## Stato
 
-Da pianificare.
+- CRUD lato server: già coperto genericamente dagli endpoint `vault-core` (`VaultItem` con `Type = CreditCard`); nessun modello dati dedicato, il payload tipizzato (Intestatario, Numero carta, Scadenza, CVV, Circuito, Note) vive interamente dentro `EncryptedPayload` lato client, come da [data-model.md](../data-model.md).
+- Utility client-side implementate in `CffVaultManager.Crypto.CardValidationService`: `IsValidCardNumber` (algoritmo di Luhn, tollerante a spazi/trattini, non lancia mai eccezioni su input malformato — pensato per validazione live del form), `DetectBrand` (riconoscimento Visa/Mastercard/Amex/Discover/Diners/JCB/UnionPay da prefisso numerico, solo euristica UX), `MaskCardNumber` (mascheramento di tutte le cifre tranne le ultime 4, raggruppate a blocchi di 4). 29 test unitari, inclusi numeri di test pubblici noti (Stripe/PayPal sandbox).
+- Da fare: pagine Blazor (`Web.Client`) per form di creazione/modifica con vista "a carta", integrazione delle utility di validazione/mascheramento nell'UI, cifratura/decifratura del payload lato client prima dell'invio agli endpoint vault-core esistenti, conferma esplicita (re-inserimento master password o timeout) per il reveal di numero completo/CVV, alert di scadenza (v2, collegato a [notifications.md](notifications.md)).
