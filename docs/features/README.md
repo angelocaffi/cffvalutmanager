@@ -19,6 +19,7 @@ Ogni feature ha un documento dedicato con: scopo, requisiti funzionali, requisit
 | [Gestione password](password-manager.md) | CRUD credenziali, generatore password, cronologia | Da pianificare |
 | [Gestione carte di credito](credit-cards.md) | CRUD carte, mascheramento PAN, scadenze | Da pianificare |
 | [Secrets generici](vault-core.md#secrets-generici) | Note sicure, API key, campi custom | Da pianificare |
+| [Gestione crypto wallet](crypto-wallets.md) | CRUD wallet, indirizzi/seed phrase, riconoscimento rete | Parziale (validazione client-side) |
 | [Audit log](audit-log.md) | Tracciamento azioni su vault e login | Da pianificare |
 | [Condivisione e controllo accessi](sharing-access-control.md) | Vault di organizzazione condivisi nello stesso tenant (scope minimo) | Da pianificare |
 

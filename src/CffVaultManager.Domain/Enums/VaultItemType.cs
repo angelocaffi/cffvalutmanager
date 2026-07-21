@@ -6,4 +6,5 @@ public enum VaultItemType
     CreditCard,
     SecureNote,
     GenericSecret,
+    CryptoWallet,
 }

@@ -66,7 +66,7 @@ Contenitore logico di secrets: vault personale di un utente o vault condiviso di
 | Id | GUID |
 | TenantId | FK a Tenant (denormalizzato, vedi sopra) |
 | VaultId | FK a Vault |
-| Type | enum: `Password`, `CreditCard`, `SecureNote`, `GenericSecret` |
+| Type | enum: `Password`, `CreditCard`, `SecureNote`, `GenericSecret`, `CryptoWallet` |
 | EncryptedPayload | **[cifrato]** — JSON serializzato specifico per tipo, poi cifrato |
 | FolderId / Tags | organizzazione (vedi [features/vault-core.md](features/vault-core.md)) |
 | IsFavorite | |
@@ -86,6 +86,10 @@ Contenitore logico di secrets: vault personale di un utente o vault condiviso di
 ### Payload — SecureNote / GenericSecret (dentro EncryptedPayload)
 
 - Title, Content **[cifrato]**, campi custom key-value **[cifrato]** (per secrets generici tipo API key, chiavi SSH, ecc.)
+
+### Payload — CryptoWallet (dentro EncryptedPayload)
+
+- Label, Network (Bitcoin/Ethereum/Litecoin/altro), WalletAddress[] (uno o più indirizzi pubblici), PrivateKey **[cifrato]**, Mnemonic/SeedPhrase **[cifrato]**, Notes **[cifrato]** — vedi [features/crypto-wallets.md](features/crypto-wallets.md)
 
 ## Folder / Tag **[tenant-scoped]**
 
