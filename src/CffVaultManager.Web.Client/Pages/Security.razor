@@ -1,6 +1,7 @@
 @page "/security"
 @attribute [Authorize]
 @inject AuthApiClient AuthApi
+@inject WebAuthnJsInterop WebAuthn
 
 <PageTitle>Sicurezza</PageTitle>
 
@@ -61,6 +62,66 @@ else
             }
         </div>
     </div>
+
+    <div class="card mt-3" style="max-width: 32rem;">
+        <div class="card-body">
+            <h2 class="h5">Chiavi di sicurezza e biometria (WebAuthn)</h2>
+            <p class="text-body-secondary small">
+                Registra un dispositivo (impronta digitale, volto, o una chiave di sicurezza fisica)
+                da usare come fattore aggiuntivo insieme alla master password. Puoi registrarne più
+                di uno.
+            </p>
+
+            @if (!_webAuthnAvailable)
+            {
+                <div class="alert alert-warning py-2" role="alert">Il tuo browser non supporta WebAuthn.</div>
+            }
+
+            @if (_webAuthnError is not null)
+            {
+                <div class="alert alert-danger py-2" role="alert">@_webAuthnError</div>
+            }
+
+            @if (_credentials is null)
+            {
+                <div class="d-flex align-items-center gap-2 text-body-secondary mb-3">
+                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <span>Caricamento…</span>
+                </div>
+            }
+            else if (_credentials.Count == 0)
+            {
+                <p class="text-body-secondary small mb-3">Nessun dispositivo registrato.</p>
+            }
+            else
+            {
+                <ul class="list-group mb-3">
+                    @foreach (var credential in _credentials)
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>@(credential.Nickname ?? "Dispositivo senza nome")</span>
+                            <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_webAuthnBusy"
+                                    @onclick="() => RemoveCredentialAsync(credential.Id)">
+                                Rimuovi
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+
+            <div class="input-group" style="max-width: 32rem;">
+                <input type="text" class="form-control" placeholder="Nome dispositivo (opzionale)"
+                       @bind="_newCredentialNickname" @bind:event="oninput" disabled="@_webAuthnBusy" />
+                <button type="button" class="btn btn-info" disabled="@(_webAuthnBusy || !_webAuthnAvailable)" @onclick="RegisterCredentialAsync">
+                    @if (_webAuthnBusy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Registra dispositivo
+                </button>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
@@ -68,7 +129,66 @@ else
     private bool _busy;
     private string? _errorMessage;
 
-    protected override async Task OnInitializedAsync() => await ReloadProfileAsync();
+    private IReadOnlyList<WebAuthnCredentialResponse>? _credentials;
+    private bool _webAuthnAvailable;
+    private bool _webAuthnBusy;
+    private string? _webAuthnError;
+    private string _newCredentialNickname = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadProfileAsync();
+        _webAuthnAvailable = await WebAuthn.IsAvailableAsync();
+        await ReloadCredentialsAsync();
+    }
+
+    private async Task ReloadCredentialsAsync() => _credentials = await AuthApi.ListWebAuthnCredentialsAsync();
+
+    private async Task RegisterCredentialAsync()
+    {
+        _webAuthnError = null;
+        _webAuthnBusy = true;
+        try
+        {
+            string optionsJson = await AuthApi.BeginWebAuthnRegistrationAsync();
+            string? attestationResponseJson = await WebAuthn.RegisterAsync(optionsJson);
+            if (attestationResponseJson is null)
+            {
+                _webAuthnError = "Registrazione annullata o non riuscita.";
+                return;
+            }
+
+            string? nickname = string.IsNullOrWhiteSpace(_newCredentialNickname) ? null : _newCredentialNickname;
+            var (success, error) = await AuthApi.CompleteWebAuthnRegistrationAsync(attestationResponseJson, nickname);
+            if (!success)
+            {
+                _webAuthnError = error;
+                return;
+            }
+
+            _newCredentialNickname = string.Empty;
+            await ReloadCredentialsAsync();
+        }
+        finally
+        {
+            _webAuthnBusy = false;
+        }
+    }
+
+    private async Task RemoveCredentialAsync(Guid credentialId)
+    {
+        _webAuthnError = null;
+        _webAuthnBusy = true;
+        try
+        {
+            await AuthApi.RemoveWebAuthnCredentialAsync(credentialId);
+            await ReloadCredentialsAsync();
+        }
+        finally
+        {
+            _webAuthnBusy = false;
+        }
+    }
 
     private async Task ReloadProfileAsync() => _profile = await AuthApi.GetProfileAsync();
 

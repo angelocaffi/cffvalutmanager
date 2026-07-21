@@ -76,6 +76,63 @@ public sealed class AuthApiClient
 
     public async Task DisableEmailOtpMfaAsync(CancellationToken ct = default) =>
         await _http.PostAsync("/api/auth/mfa/email-otp/disable", content: null, ct);
+
+    /// <summary>Starts a WebAuthn registration ceremony; returns the raw CredentialCreateOptions JSON to hand to the browser.</summary>
+    public async Task<string> BeginWebAuthnRegistrationAsync(CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync("/api/auth/webauthn/register/begin", content: null, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    /// <summary>
+    /// Completes a WebAuthn registration with the browser's attestation response. Fails with a
+    /// 400-derived message if the attestation itself doesn't verify (wrong origin, tampered
+    /// response, expired ceremony, etc.).
+    /// </summary>
+    public async Task<(bool Success, string? Error)> CompleteWebAuthnRegistrationAsync(
+        string attestationResponseJson, string? nickname, CancellationToken ct = default)
+    {
+        using var doc = JsonDocument.Parse(attestationResponseJson);
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/webauthn/register/complete",
+            new { AttestationResponse = doc.RootElement, Nickname = nickname },
+            ct);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return (true, null);
+        }
+
+        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+        return (false, problem?.Error ?? "Impossibile registrare il dispositivo.");
+    }
+
+    public async Task<IReadOnlyList<WebAuthnCredentialResponse>> ListWebAuthnCredentialsAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<IReadOnlyList<WebAuthnCredentialResponse>>("/api/auth/webauthn/credentials", JsonOptions, ct) ?? [];
+
+    public async Task RemoveWebAuthnCredentialAsync(Guid credentialId, CancellationToken ct = default) =>
+        await _http.PostAsync($"/api/auth/webauthn/credentials/{credentialId}/remove", content: null, ct);
+
+    /// <summary>
+    /// Starts a WebAuthn assertion for an in-progress MFA challenge; returns the raw
+    /// AssertionOptions JSON to hand to the browser, or null if the challenge token itself is
+    /// invalid/expired.
+    /// </summary>
+    public async Task<string?> BeginWebAuthnAssertionAsync(string challengeToken, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/webauthn/assertion/begin", new { ChallengeToken = challengeToken }, ct);
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
+    }
+
+    public async Task<LoginResponse> CompleteWebAuthnAssertionAsync(string challengeToken, string assertionResponseJson, CancellationToken ct = default)
+    {
+        using var doc = JsonDocument.Parse(assertionResponseJson);
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/webauthn/assertion/complete",
+            new { ChallengeToken = challengeToken, AssertionResponse = doc.RootElement },
+            ct);
+        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+    }
 }
 
 public sealed record PreloginResponse(byte[] MasterPasswordSalt, int KdfMemoryKb, int KdfIterations, int KdfVersion);
@@ -94,5 +151,7 @@ public sealed record LoginResponse(
     CryptoMaterialsResponse? CryptoMaterials);
 
 public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled);
+
+public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 
 public sealed record ErrorResponse(string? Error);

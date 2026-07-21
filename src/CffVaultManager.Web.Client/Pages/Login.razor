@@ -9,6 +9,7 @@
 @inject IDekService DekService
 @inject SessionState Session
 @inject NavigationManager Navigation
+@inject WebAuthnJsInterop WebAuthn
 
 <PageTitle>Accedi</PageTitle>
 
@@ -58,6 +59,12 @@
                 }
 
                 <div class="d-grid gap-2">
+                    @if (_availableFactors.Contains("WebAuthn"))
+                    {
+                        <button type="button" class="btn btn-outline-info" @onclick='() => SelectFactorAsync("WebAuthn")'>
+                            Chiave di sicurezza o impronta/volto
+                        </button>
+                    }
                     @if (_availableFactors.Contains("Totp"))
                     {
                         <button type="button" class="btn btn-outline-info" @onclick='() => SelectFactorAsync("Totp")'>
@@ -71,6 +78,34 @@
                         </button>
                     }
                 </div>
+            }
+            else if (_selectedFactor == "WebAuthn")
+            {
+                <p class="text-body-secondary small">
+                    @(_busy
+                        ? "Segui le istruzioni del browser per verificare la tua identità (impronta, volto o chiave di sicurezza)."
+                        : "Verifica non riuscita o annullata.")
+                </p>
+
+                @if (_errorMessage is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                }
+
+                <button type="button" class="btn btn-info w-100 mb-2" disabled="@_busy" @onclick="StartWebAuthnAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    @(_busy ? "Verifica in corso…" : "Riprova")
+                </button>
+
+                @if (_availableFactors.Count > 1)
+                {
+                    <button type="button" class="btn btn-link btn-sm w-100" disabled="@_busy" @onclick="ResetFactorSelection">
+                        Usa un altro metodo
+                    </button>
+                }
             }
             else
             {
@@ -227,6 +262,52 @@
         {
             await SendEmailOtpAsync();
         }
+        else if (factor == "WebAuthn")
+        {
+            await StartWebAuthnAsync();
+        }
+    }
+
+    private async Task StartWebAuthnAsync()
+    {
+        if (_pendingChallengeToken is null)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            string? optionsJson = await AuthApi.BeginWebAuthnAssertionAsync(_pendingChallengeToken);
+            if (optionsJson is null)
+            {
+                _errorMessage = "Impossibile avviare la verifica. Riprova ad accedere.";
+                return;
+            }
+
+            string? assertionResponseJson = await WebAuthn.AuthenticateAsync(optionsJson);
+            if (assertionResponseJson is null)
+            {
+                _errorMessage = "Verifica annullata o non riuscita.";
+                return;
+            }
+
+            var result = await AuthApi.CompleteWebAuthnAssertionAsync(_pendingChallengeToken, assertionResponseJson);
+            if (!result.Success || result.AccessToken is null || result.RefreshToken is null
+                || result.CryptoMaterials is null || _pendingKek is null)
+            {
+                _errorMessage = "Verifica non riuscita.";
+                return;
+            }
+
+            CompleteLogin(result, _pendingKek);
+            ClearPendingKek();
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private void ResetFactorSelection()
@@ -237,6 +318,20 @@
         _errorMessage = null;
         _resendCooldownSeconds = 0;
         _codeExpirySeconds = null;
+    }
+
+    // Zeroes and drops the in-memory KEK. Called only once the MFA step is truly done — a
+    // completed login, or the component being torn down (navigating away mid-flow) — never after
+    // a merely wrong code/failed assertion, which must still allow further attempts up to the
+    // server's own lockout (docs/features/authentication.md). The KEK itself doesn't depend on
+    // which second factor completes it, so switching factors via "Usa un altro metodo" keeps it.
+    private void ClearPendingKek()
+    {
+        if (_pendingKek is not null)
+        {
+            CryptographicOperations.ZeroMemory(_pendingKek);
+            _pendingKek = null;
+        }
     }
 
     private async Task SendEmailOtpAsync()
@@ -323,15 +418,10 @@
             }
 
             CompleteLogin(result, _pendingKek);
+            ClearPendingKek();
         }
         finally
         {
-            if (_pendingKek is not null)
-            {
-                CryptographicOperations.ZeroMemory(_pendingKek);
-                _pendingKek = null;
-            }
-
             _mfaCode = string.Empty;
             _busy = false;
         }
@@ -349,5 +439,9 @@
         Navigation.NavigateTo(string.IsNullOrEmpty(_returnUrl) ? "/vault" : _returnUrl);
     }
 
-    public void Dispose() => StopCountdown();
+    public void Dispose()
+    {
+        StopCountdown();
+        ClearPendingKek();
+    }
 }

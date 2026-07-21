@@ -28,5 +28,6 @@ builder.Services.AddHttpClient("Api", client =>
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("Api"));
 builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
+builder.Services.AddScoped<WebAuthnJsInterop>();
 
 await builder.Build().RunAsync();
