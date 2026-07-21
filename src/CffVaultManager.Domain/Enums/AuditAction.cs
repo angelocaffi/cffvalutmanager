@@ -24,4 +24,6 @@ public enum AuditAction
     UserRoleChanged,
     PermanentlyDeleted,
     MasterPasswordChanged,
+    MfaEmailOtpEnabled,
+    MfaEmailOtpDisabled,
 }

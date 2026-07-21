@@ -1,5 +1,6 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Domain.Enums;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace CffVaultManager.Api.Endpoints;
@@ -49,9 +50,42 @@ internal static class AuthEndpoints
 
         app.MapPost("/api/auth/mfa/verify", async (VerifyMfaRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
-            var result = await auth.VerifyMfaAsync(request.ChallengeToken, request.Code, ClientIp(http), UserAgent(http), ct);
+            var result = await auth.VerifyMfaAsync(request.ChallengeToken, request.Code, request.Factor, ClientIp(http), UserAgent(http), ct);
             return result.Success ? Results.Ok(result) : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
         }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
+        // Email OTP requires an explicit send (unlike TOTP, whose code already lives on the
+        // user's device) — see docs/features/authentication.md "Email OTP come fattore MFA". The
+        // challenge token itself is the only identity carried here; a user without this factor
+        // enabled still gets a 202 (uniform response, no-op internally in EmailOtpMfaService).
+        app.MapPost("/api/auth/mfa/email-otp/send", async (
+            MfaEmailOtpSendRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
+        {
+            bool ok = await auth.RequestMfaEmailOtpAsync(request.ChallengeToken, ClientIp(http), UserAgent(http), ct);
+            return ok ? Results.Accepted() : Results.Unauthorized();
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
+        // Enabling/disabling Email OTP as an MFA factor is a plain authenticated settings change —
+        // unlike TOTP there is no secret to enroll, so no separate confirm step: possession of the
+        // account email was already proven at registration (EmailVerifiedAt), which enable requires.
+        app.MapPost("/api/auth/mfa/email-otp/enable", async (IEmailOtpMfaService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                await service.EnableAsync(tenantContext.UserId!.Value, ct);
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        }).RequireAuthorization();
+
+        app.MapPost("/api/auth/mfa/email-otp/disable", async (IEmailOtpMfaService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            await service.DisableAsync(tenantContext.UserId!.Value, ct);
+            return Results.NoContent();
+        }).RequireAuthorization();
 
         app.MapPost("/api/auth/refresh", async (RefreshRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
@@ -145,7 +179,9 @@ internal sealed record PreloginRequest(string Email);
 
 internal sealed record LoginRequest(string Email, byte[] AuthHash);
 
-internal sealed record VerifyMfaRequest(string ChallengeToken, string Code);
+internal sealed record VerifyMfaRequest(string ChallengeToken, string Code, MfaFactor Factor = MfaFactor.Totp);
+
+internal sealed record MfaEmailOtpSendRequest(string ChallengeToken);
 
 internal sealed record RefreshRequest(string RefreshToken);
 

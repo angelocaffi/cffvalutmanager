@@ -1,3 +1,5 @@
+using CffVaultManager.Domain.Enums;
+
 namespace CffVaultManager.Application.Dtos.Authentication;
 
 /// <summary>
@@ -28,6 +30,13 @@ public sealed record LoginResult
     /// <summary>Short-lived challenge JWT, present only when <see cref="RequiresMfa"/> is true.</summary>
     public string? MfaChallengeToken { get; private init; }
 
+    /// <summary>
+    /// The factor(s) the user has registered and may complete the challenge with, present only
+    /// when <see cref="RequiresMfa"/> is true — lets the client offer a choice (or send the Email
+    /// OTP code) when more than one is enabled.
+    /// </summary>
+    public IReadOnlyList<MfaFactor> AvailableMfaFactors { get; private init; } = Array.Empty<MfaFactor>();
+
     /// <summary>Zero-knowledge material for the client, present only on a fully authenticated result.</summary>
     public CryptoMaterials? CryptoMaterials { get; private init; }
 
@@ -39,11 +48,12 @@ public sealed record LoginResult
         CryptoMaterials = materials,
     };
 
-    public static LoginResult MfaRequired(string challengeToken) => new()
+    public static LoginResult MfaRequired(string challengeToken, IReadOnlyList<MfaFactor> availableFactors) => new()
     {
         Success = false,
         RequiresMfa = true,
         MfaChallengeToken = challengeToken,
+        AvailableMfaFactors = availableFactors,
     };
 
     public static LoginResult Failure(string reason = "Invalid credentials.") => new()

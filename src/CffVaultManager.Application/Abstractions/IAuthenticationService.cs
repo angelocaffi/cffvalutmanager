@@ -1,10 +1,12 @@
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Domain.Enums;
 
 namespace CffVaultManager.Application.Abstractions;
 
 /// <summary>
 /// Drives the zero-knowledge login flow: password (auth hash) verification followed, when enabled,
-/// by a TOTP second factor. Failures are always generic to avoid account enumeration.
+/// by a second factor (TOTP and/or Email OTP — see <see cref="MfaFactor"/>). Failures are always
+/// generic to avoid account enumeration.
 /// </summary>
 public interface IAuthenticationService
 {
@@ -25,10 +27,19 @@ public interface IAuthenticationService
     Task<LoginResult> LoginAsync(string email, byte[] authHash, string? ip, string? userAgent, CancellationToken ct = default);
 
     /// <summary>
-    /// Completes an MFA challenge: validates the challenge token and the TOTP code, and on success
-    /// returns the full session.
+    /// Completes an MFA challenge: validates the challenge token and the code against the chosen
+    /// <paramref name="factor"/>, and on success returns the full session.
     /// </summary>
-    Task<LoginResult> VerifyMfaAsync(string challengeToken, string totpCode, string? ip, string? userAgent, CancellationToken ct = default);
+    Task<LoginResult> VerifyMfaAsync(string challengeToken, string code, MfaFactor factor, string? ip, string? userAgent, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sends an Email OTP code for an in-progress MFA challenge (see docs/features/authentication.md
+    /// "Email OTP come fattore MFA") — unlike TOTP, which the user already has on their device, an
+    /// Email OTP code must be actively dispatched before it can be entered. Returns false only when
+    /// the challenge token itself is missing/invalid/expired; a user without this factor enabled
+    /// still gets true (uniform response, no-op internally).
+    /// </summary>
+    Task<bool> RequestMfaEmailOtpAsync(string challengeToken, string? ip, string? userAgent, CancellationToken ct = default);
 
     /// <summary>
     /// Rotates an opaque refresh token and mints a fresh access token for its owner. Returns a

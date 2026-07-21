@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
@@ -10,20 +8,18 @@ namespace CffVaultManager.Infrastructure.Authentication;
 
 /// <summary>
 /// Email-ownership verification via a short numeric one-time code, reusing the <see
-/// cref="OneTimeCode"/> entity scaffolded since Fase 0 for this and the (not yet built) Email OTP
-/// MFA factor. The code is hashed at rest with HMAC-SHA256 (not Argon2id): unlike an auth hash or
-/// a refresh token, this is a short-lived, single-purpose 6-digit value — the real defenses
-/// against brute force are the short expiry, the per-code attempt cap, and IP rate limiting on
-/// the HTTP endpoints, not an expensive hash, which would only slow down legitimate retries for no
-/// real benefit against an attacker who already has a copy of the hashed row.
+/// cref="OneTimeCode"/> entity scaffolded since Fase 0 for this and the Email OTP MFA factor (see
+/// <see cref="EmailOtpMfaService"/>) — both share the hashing scheme in <see cref="OneTimeCodeHasher"/>:
+/// HMAC-SHA256 salted per record, not Argon2id, because the real defenses against brute force are
+/// the short expiry, the per-code attempt cap, and IP rate limiting on the HTTP endpoints, not an
+/// expensive hash that would only slow down legitimate retries for no real benefit against an
+/// attacker who already has a copy of the hashed row.
 /// </summary>
 internal sealed class EmailVerificationService : IEmailVerificationService
 {
     private static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan ResendCooldown = TimeSpan.FromSeconds(60);
     private const int MaxAttempts = 5;
-    private const int SaltLength = 16;
-    private const int DigestLength = 32;
 
     private readonly CffVaultManagerDbContext _db;
     private readonly IEmailSender _emailSender;
@@ -90,7 +86,7 @@ internal sealed class EmailVerificationService : IEmailVerificationService
 
         current.AttemptCount++;
 
-        if (!VerifyCode(code, current.CodeHash))
+        if (!OneTimeCodeHasher.Verify(code, current.CodeHash))
         {
             WriteAudit(user, AuditAction.EmailOtpFailed, ip, userAgent);
             await _db.SaveChangesAsync(ct);
@@ -106,12 +102,12 @@ internal sealed class EmailVerificationService : IEmailVerificationService
 
     private async Task GenerateAndSendAsync(User user, string? ip, string? userAgent, CancellationToken ct)
     {
-        string code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+        string code = OneTimeCodeHasher.GenerateNumericCode();
         var entry = new OneTimeCode(
             Guid.NewGuid(),
             user.Id,
             OtpPurpose.EmailVerification,
-            BuildStoredHash(code),
+            OneTimeCodeHasher.Hash(code),
             DateTimeOffset.UtcNow.Add(CodeLifetime),
             MaxAttempts,
             ipAddress: ip,
@@ -133,28 +129,4 @@ internal sealed class EmailVerificationService : IEmailVerificationService
 
     private void WriteAudit(User user, AuditAction action, string? ip, string? userAgent) =>
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, action, ipAddress: ip, userAgent: userAgent));
-
-    private static byte[] BuildStoredHash(string code)
-    {
-        byte[] salt = RandomNumberGenerator.GetBytes(SaltLength);
-        byte[] digest = HMACSHA256.HashData(salt, Encoding.UTF8.GetBytes(code));
-
-        byte[] stored = new byte[SaltLength + DigestLength];
-        salt.CopyTo(stored, 0);
-        digest.CopyTo(stored, SaltLength);
-        return stored;
-    }
-
-    private static bool VerifyCode(string code, byte[] storedHash)
-    {
-        if (storedHash.Length != SaltLength + DigestLength)
-        {
-            return false;
-        }
-
-        byte[] salt = storedHash.AsSpan(0, SaltLength).ToArray();
-        byte[] expected = storedHash.AsSpan(SaltLength, DigestLength).ToArray();
-        byte[] actual = HMACSHA256.HashData(salt, Encoding.UTF8.GetBytes(code));
-        return CryptographicOperations.FixedTimeEquals(actual, expected);
-    }
 }

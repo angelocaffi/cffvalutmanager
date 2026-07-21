@@ -33,6 +33,7 @@ internal sealed class AuthenticationService : IAuthenticationService
     private readonly IRefreshTokenService _refreshTokens;
     private readonly ITotpService _totp;
     private readonly ISecretProtector _secretProtector;
+    private readonly IEmailOtpMfaService _emailOtpMfa;
 
     // A syntactically valid but never-matching stored hash, used so an unknown-email login pays
     // the same Argon2id cost as a wrong-password attempt against a real account — otherwise
@@ -60,7 +61,8 @@ internal sealed class AuthenticationService : IAuthenticationService
         IJwtTokenService jwt,
         IRefreshTokenService refreshTokens,
         ITotpService totp,
-        ISecretProtector secretProtector)
+        ISecretProtector secretProtector,
+        IEmailOtpMfaService emailOtpMfa)
     {
         _db = db;
         _authHashHasher = authHashHasher;
@@ -68,6 +70,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         _refreshTokens = refreshTokens;
         _totp = totp;
         _secretProtector = secretProtector;
+        _emailOtpMfa = emailOtpMfa;
         _dummyStoredHash = GetOrCreateDummyStoredHash(authHashHasher);
     }
 
@@ -155,17 +158,18 @@ internal sealed class AuthenticationService : IAuthenticationService
 
         ResetLockoutState(user);
 
-        if (user.MfaEnabled)
+        var availableFactors = AvailableFactors(user);
+        if (availableFactors.Count > 0)
         {
             await WriteAuditAsync(user, AuditAction.MfaChallenge, ip, userAgent, ct);
             string challenge = _jwt.CreateMfaChallengeToken(user.Id, MfaChallengeLifetime);
-            return LoginResult.MfaRequired(challenge);
+            return LoginResult.MfaRequired(challenge, availableFactors);
         }
 
         return await IssueSessionAsync(user, ip, userAgent, ct);
     }
 
-    public async Task<LoginResult> VerifyMfaAsync(string challengeToken, string totpCode, string? ip, string? userAgent, CancellationToken ct = default)
+    public async Task<LoginResult> VerifyMfaAsync(string challengeToken, string code, MfaFactor factor, string? ip, string? userAgent, CancellationToken ct = default)
     {
         var claims = await _jwt.ValidateAsync(challengeToken, JwtTokenService.MfaChallengePurpose);
         if (claims is null)
@@ -177,7 +181,7 @@ internal sealed class AuthenticationService : IAuthenticationService
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == claims.UserId, ct);
 
-        if (user is null || !user.MfaEnabled || user.MfaSecret is null)
+        if (user is null)
         {
             return LoginResult.Failure();
         }
@@ -188,13 +192,21 @@ internal sealed class AuthenticationService : IAuthenticationService
             return LoginResult.Failure();
         }
 
-        byte[] secret = _secretProtector.Unprotect(user.MfaSecret);
-        if (!_totp.ValidateCode(secret, totpCode))
+        // No dedicated "MfaFailed" audit action exists for TOTP; LoginFailed is reused for a
+        // failed second factor (a wrong Email OTP code is separately audited as EmailOtpFailed by
+        // EmailOtpMfaService itself). A wrong code counts toward the same lockout as a wrong
+        // password — the attacker already cleared the password check to get here, and a 6-digit
+        // code is brute-forceable without this.
+        bool valid = factor switch
         {
-            // No dedicated "MfaFailed" audit action exists; LoginFailed is reused for a failed
-            // second factor to avoid introducing new enum values in this round. A wrong TOTP code
-            // counts toward the same lockout as a wrong password — the attacker already cleared the
-            // password check to get here, and a 6-digit code is brute-forceable without this.
+            MfaFactor.Totp => user.MfaEnabled && user.MfaSecret is not null
+                && _totp.ValidateCode(_secretProtector.Unprotect(user.MfaSecret), code),
+            MfaFactor.EmailOtp => await _emailOtpMfa.VerifyChallengeCodeAsync(user.Id, code, ip, userAgent, ct),
+            _ => false,
+        };
+
+        if (!valid)
+        {
             await RegisterFailedAttemptAsync(user, ip, userAgent, ct);
             return LoginResult.Failure();
         }
@@ -202,6 +214,41 @@ internal sealed class AuthenticationService : IAuthenticationService
         ResetLockoutState(user);
 
         return await IssueSessionAsync(user, ip, userAgent, ct);
+    }
+
+    /// <summary>
+    /// Sends an Email OTP code for an in-progress MFA challenge (see docs/features/authentication.md
+    /// "Email OTP come fattore MFA"). Unlike TOTP, whose code lives on the user's own device, Email
+    /// OTP requires an explicit send step before the user has anything to enter.
+    /// </summary>
+    public async Task<bool> RequestMfaEmailOtpAsync(string challengeToken, string? ip, string? userAgent, CancellationToken ct = default)
+    {
+        var claims = await _jwt.ValidateAsync(challengeToken, JwtTokenService.MfaChallengePurpose);
+        if (claims is null)
+        {
+            return false;
+        }
+
+        // Uniform response regardless of whether the user actually has this factor enabled — see
+        // EmailOtpMfaService.SendChallengeCodeAsync, which no-ops in that case.
+        await _emailOtpMfa.SendChallengeCodeAsync(claims.UserId, ip, userAgent, ct);
+        return true;
+    }
+
+    private static IReadOnlyList<MfaFactor> AvailableFactors(User user)
+    {
+        var factors = new List<MfaFactor>();
+        if (user.MfaEnabled)
+        {
+            factors.Add(MfaFactor.Totp);
+        }
+
+        if (user.MfaEmailOtpEnabled)
+        {
+            factors.Add(MfaFactor.EmailOtp);
+        }
+
+        return factors;
     }
 
     public async Task<LoginResult> RefreshAsync(string refreshToken, string? ip, string? userAgent, CancellationToken ct = default)

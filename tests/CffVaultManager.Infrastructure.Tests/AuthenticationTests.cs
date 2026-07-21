@@ -294,7 +294,7 @@ public sealed class AuthenticationTests : IDisposable
 
         for (int i = 0; i < 5; i++)
         {
-            await auth.VerifyMfaAsync(challenge, "000000", null, null);
+            await auth.VerifyMfaAsync(challenge, "000000", MfaFactor.Totp, null, null);
         }
 
         var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
@@ -317,11 +317,11 @@ public sealed class AuthenticationTests : IDisposable
 
         for (int i = 0; i < 5; i++)
         {
-            await auth.VerifyMfaAsync(challenge, "000000", null, null);
+            await auth.VerifyMfaAsync(challenge, "000000", MfaFactor.Totp, null, null);
         }
 
         var code = new OtpNet.Totp(secret).ComputeTotp();
-        var result = await auth.VerifyMfaAsync(challenge, code, null, null);
+        var result = await auth.VerifyMfaAsync(challenge, code, MfaFactor.Totp, null, null);
 
         Assert.False(result.Success);
         Assert.Null(result.AccessToken);
@@ -379,7 +379,7 @@ public sealed class AuthenticationTests : IDisposable
         var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
         var code = new OtpNet.Totp(secret).ComputeTotp();
 
-        var result = await auth.VerifyMfaAsync(challenge, code, null, null);
+        var result = await auth.VerifyMfaAsync(challenge, code, MfaFactor.Totp, null, null);
 
         Assert.True(result.Success);
         Assert.NotNull(result.AccessToken);
@@ -400,11 +400,180 @@ public sealed class AuthenticationTests : IDisposable
 
         var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
 
-        var result = await auth.VerifyMfaAsync(challenge, "000000", null, null);
+        var result = await auth.VerifyMfaAsync(challenge, "000000", MfaFactor.Totp, null, null);
 
         Assert.False(result.Success);
         Assert.Null(result.AccessToken);
         Assert.Null(result.CryptoMaterials);
+    }
+
+    // ---- Email OTP as an MFA factor ---------------------------------------------------------
+
+    [Fact]
+    public async Task EnableAsync_without_a_verified_email_throws()
+    {
+        var (_, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new EmailOtpMfaService(ctx, new FakeEmailSender());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.EnableAsync(adminId));
+    }
+
+    [Fact]
+    public async Task EnableAsync_with_a_verified_email_sets_the_flag_and_writes_audit()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        await VerifyEmailAsync(adminId);
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new EmailOtpMfaService(ctx, new FakeEmailSender()).EnableAsync(adminId);
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.True(user.MfaEmailOtpEnabled);
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.MfaEmailOtpEnabled));
+    }
+
+    [Fact]
+    public async Task DisableAsync_clears_the_flag_and_writes_audit()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        await VerifyEmailAsync(adminId);
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new EmailOtpMfaService(ctx, new FakeEmailSender()).EnableAsync(adminId);
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new EmailOtpMfaService(ctx, new FakeEmailSender()).DisableAsync(adminId);
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.False(user.MfaEmailOtpEnabled);
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.MfaEmailOtpDisabled));
+    }
+
+    [Fact]
+    public async Task Login_with_only_email_otp_enabled_returns_a_challenge_listing_that_factor()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.False(result.Success);
+        Assert.True(result.RequiresMfa);
+        Assert.NotNull(result.MfaChallengeToken);
+        Assert.Equal(new[] { MfaFactor.EmailOtp }, result.AvailableMfaFactors);
+    }
+
+    [Fact]
+    public async Task Login_with_both_factors_enabled_lists_both()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+        await EnableMfaAsync(tenantId, adminId, _totp.GenerateSecret());
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.Equal(new[] { MfaFactor.Totp, MfaFactor.EmailOtp }, result.AvailableMfaFactors);
+    }
+
+    [Fact]
+    public async Task RequestMfaEmailOtpAsync_sends_a_code_that_VerifyMfaAsync_accepts()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx, sender);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+
+        Assert.True(await auth.RequestMfaEmailOtpAsync(challenge, null, null));
+        Assert.Equal("admin@x.com", sender.LastToEmail);
+        string code = ExtractCode(sender.LastBody!);
+
+        var result = await auth.VerifyMfaAsync(challenge, code, MfaFactor.EmailOtp, null, null);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
+        Assert.NotNull(result.CryptoMaterials);
+    }
+
+    [Fact]
+    public async Task RequestMfaEmailOtpAsync_with_an_invalid_challenge_token_returns_false()
+    {
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        Assert.False(await auth.RequestMfaEmailOtpAsync("not-a-real-token", null, null));
+    }
+
+    [Fact]
+    public async Task VerifyMfaAsync_with_wrong_email_otp_code_fails_and_counts_toward_lockout()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx, sender);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+        await auth.RequestMfaEmailOtpAsync(challenge, null, null);
+        string realCode = ExtractCode(sender.LastBody!);
+        string wrongCode = realCode == "000000" ? "111111" : "000000";
+
+        var result = await auth.VerifyMfaAsync(challenge, wrongCode, MfaFactor.EmailOtp, null, null);
+
+        Assert.False(result.Success);
+
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.Equal(1, user.FailedLoginAttempts);
+    }
+
+    [Fact]
+    public async Task VerifyMfaAsync_for_a_factor_the_user_never_enabled_fails()
+    {
+        // A challenge exists because TOTP is enabled, but the attacker (or a buggy client) tries
+        // to complete it against the EmailOtp factor, which this user never turned on.
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await EnableMfaAsync(tenantId, adminId, _totp.GenerateSecret());
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+
+        var result = await auth.VerifyMfaAsync(challenge, "123456", MfaFactor.EmailOtp, null, null);
+
+        Assert.False(result.Success);
     }
 
     [Fact]
@@ -439,7 +608,7 @@ public sealed class AuthenticationTests : IDisposable
         await SuspendTenantAsync(tenantId);
         var code = new OtpNet.Totp(secret).ComputeTotp();
 
-        var result = await auth.VerifyMfaAsync(challenge, code, null, null);
+        var result = await auth.VerifyMfaAsync(challenge, code, MfaFactor.Totp, null, null);
 
         Assert.False(result.Success);
         Assert.Null(result.AccessToken);
@@ -1037,7 +1206,11 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     private AuthenticationService CreateAuthService(CffVaultManagerDbContext ctx) =>
-        new(ctx, _authHashHasher, _jwt, new RefreshTokenService(ctx), _totp, _secretProtector);
+        CreateAuthService(ctx, new FakeEmailSender());
+
+    private AuthenticationService CreateAuthService(CffVaultManagerDbContext ctx, IEmailSender emailSender) =>
+        new(ctx, _authHashHasher, _jwt, new RefreshTokenService(ctx), _totp, _secretProtector,
+            new EmailOtpMfaService(ctx, emailSender));
 
     private async Task<(Guid TenantId, Guid AdminId)> ProvisionAsync(byte[] authHash)
     {
@@ -1070,6 +1243,20 @@ public sealed class AuthenticationTests : IDisposable
         user.MfaSecret = _secretProtector.Protect(secret);
         user.MfaEnabled = true;
         await ctx.SaveChangesAsync();
+    }
+
+    private async Task VerifyEmailAsync(Guid userId)
+    {
+        using var ctx = CreateContext(SuperAdmin());
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == userId);
+        user.EmailVerifiedAt = DateTimeOffset.UtcNow;
+        await ctx.SaveChangesAsync();
+    }
+
+    private async Task EnableEmailOtpMfaAsync(Guid tenantId, Guid userId)
+    {
+        using var ctx = CreateContext(Tenant(tenantId, userId));
+        await new EmailOtpMfaService(ctx, new FakeEmailSender()).EnableAsync(userId);
     }
 
     private static ProvisionTenantRequest NewProvisionRequest(byte[] authHash) => new(
