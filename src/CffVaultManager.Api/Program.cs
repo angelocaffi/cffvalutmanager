@@ -110,6 +110,7 @@ app.MapTagEndpoints();
 app.MapVaultItemEndpoints();
 app.MapVaultMembershipEndpoints();
 app.MapAuditEndpoints();
+app.MapWebAuthnEndpoints();
 
 app.Run();
 

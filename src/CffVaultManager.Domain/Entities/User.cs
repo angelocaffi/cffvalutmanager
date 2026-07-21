@@ -182,6 +182,8 @@ public class User
 
     public ICollection<OneTimeCode> OneTimeCodes { get; } = new List<OneTimeCode>();
 
+    public ICollection<WebAuthnCredential> WebAuthnCredentials { get; } = new List<WebAuthnCredential>();
+
     public ICollection<AuditLogEntry> AuditLogEntries { get; } = new List<AuditLogEntry>();
 
     public ICollection<Vault> OwnedVaults { get; } = new List<Vault>();

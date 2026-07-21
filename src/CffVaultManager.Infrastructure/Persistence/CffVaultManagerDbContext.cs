@@ -44,6 +44,10 @@ public class CffVaultManagerDbContext : DbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
+
+    public DbSet<WebAuthnCeremony> WebAuthnCeremonies => Set<WebAuthnCeremony>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Configurations whose global query filter reads the current tenant take this
@@ -61,5 +65,7 @@ public class CffVaultManagerDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AuditLogEntryConfiguration(this));
         modelBuilder.ApplyConfiguration(new OneTimeCodeConfiguration());
         modelBuilder.ApplyConfiguration(new RefreshTokenConfiguration());
+        modelBuilder.ApplyConfiguration(new WebAuthnCredentialConfiguration());
+        modelBuilder.ApplyConfiguration(new WebAuthnCeremonyConfiguration());
     }
 }

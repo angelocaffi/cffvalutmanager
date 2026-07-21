@@ -5,4 +5,5 @@ public enum MfaFactor
 {
     Totp,
     EmailOtp,
+    WebAuthn,
 }

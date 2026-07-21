@@ -26,4 +26,6 @@ public enum AuditAction
     MasterPasswordChanged,
     MfaEmailOtpEnabled,
     MfaEmailOtpDisabled,
+    WebAuthnCredentialRegistered,
+    WebAuthnCredentialRemoved,
 }

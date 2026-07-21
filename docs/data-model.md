@@ -51,6 +51,36 @@ Codice one-time monouso usato per verifica email in registrazione, Email OTP com
 | CreatedAt | usato anche per il cooldown di reinvio (es. 60s) |
 | IpAddress / UserAgent | metadato contestuale della richiesta |
 
+## WebAuthnCredential **[tenant-scoped indirettamente tramite UserId]**
+
+Una credenziale WebAuthn/FIDO2 registrata (Windows Hello, Touch ID, chiave di sicurezza, ecc.) — un utente può averne più di una, una per dispositivo. Vedi [features/authentication.md](features/authentication.md).
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| UserId | FK a User |
+| CredentialId | ID credenziale assegnato dall'authenticator — non un segreto, ma univoco a livello globale (indice unique) |
+| PublicKey | chiave pubblica COSE, in chiaro per definizione (come `User.PublicKey`) |
+| SignCount | contatore anti-clonazione dell'authenticator, aggiornato a ogni asserzione riuscita |
+| AaGuid | identifica il modello di authenticator, solo informativo |
+| Nickname | etichetta scelta dall'utente (es. "YubiKey", "Windows Hello") |
+| Transports | hint di trasporto (usb/nfc/ble/interno), solo informativo |
+| CreatedAt / LastUsedAt | |
+
+## WebAuthnCeremony **[tenant-scoped indirettamente tramite UserId]**
+
+Stato lato server di una cerimonia WebAuthn (registrazione o asserzione) in corso, tra la chiamata "begin" e "complete" — le opzioni generate per il client vanno ripresentate identiche in fase di verifica, stesso pattern a riga-breve di `OneTimeCode`.
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| UserId | FK a User |
+| Purpose | enum: `Registration`, `Assertion` |
+| OptionsJson | `CredentialCreateOptions`/`AssertionOptions` serializzati |
+| ExpiresAt | scadenza breve (5 min) |
+| ConsumedAt | nullable — valorizzato al completamento (successo o fallimento) |
+| CreatedAt | |
+
 ## Vault **[tenant-scoped]**
 
 Contenitore logico di secrets: vault personale di un utente o vault condiviso di organizzazione (vedi [features/sharing-access-control.md](features/sharing-access-control.md)).
@@ -131,7 +161,7 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
@@ -142,6 +172,8 @@ Tenant 1---N User (tranne SuperAdmin, TenantId nullo)
 Tenant 1---N Vault 1---N VaultItem N---1 Folder
 User 1---N AuditLogEntry
 User 1---N OneTimeCode
+User 1---N WebAuthnCredential
+User 1---N WebAuthnCeremony
 VaultItem N---N Tag
 Vault 1---N VaultMembership N---1 User (solo vault di organizzazione)
 ```

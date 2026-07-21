@@ -34,6 +34,7 @@ internal sealed class AuthenticationService : IAuthenticationService
     private readonly ITotpService _totp;
     private readonly ISecretProtector _secretProtector;
     private readonly IEmailOtpMfaService _emailOtpMfa;
+    private readonly IWebAuthnService _webAuthn;
 
     // A syntactically valid but never-matching stored hash, used so an unknown-email login pays
     // the same Argon2id cost as a wrong-password attempt against a real account — otherwise
@@ -62,7 +63,8 @@ internal sealed class AuthenticationService : IAuthenticationService
         IRefreshTokenService refreshTokens,
         ITotpService totp,
         ISecretProtector secretProtector,
-        IEmailOtpMfaService emailOtpMfa)
+        IEmailOtpMfaService emailOtpMfa,
+        IWebAuthnService webAuthn)
     {
         _db = db;
         _authHashHasher = authHashHasher;
@@ -71,6 +73,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         _totp = totp;
         _secretProtector = secretProtector;
         _emailOtpMfa = emailOtpMfa;
+        _webAuthn = webAuthn;
         _dummyStoredHash = GetOrCreateDummyStoredHash(authHashHasher);
     }
 
@@ -158,7 +161,7 @@ internal sealed class AuthenticationService : IAuthenticationService
 
         ResetLockoutState(user);
 
-        var availableFactors = AvailableFactors(user);
+        var availableFactors = await AvailableFactorsAsync(user, ct);
         if (availableFactors.Count > 0)
         {
             await WriteAuditAsync(user, AuditAction.MfaChallenge, ip, userAgent, ct);
@@ -235,7 +238,54 @@ internal sealed class AuthenticationService : IAuthenticationService
         return true;
     }
 
-    private static IReadOnlyList<MfaFactor> AvailableFactors(User user)
+    /// <summary>
+    /// Starts a WebAuthn assertion for an in-progress MFA challenge (see docs/features/authentication.md
+    /// "WebAuthn/Passkey"). Unlike Email OTP's uniform-response send, this returns null both for an
+    /// invalid challenge token and for a user with no registered credential — the client needs the
+    /// actual options to call <c>navigator.credentials.get()</c>, so there is no meaningful uniform
+    /// response to give it in either case.
+    /// </summary>
+    public async Task<string?> RequestWebAuthnAssertionOptionsAsync(string challengeToken, CancellationToken ct = default)
+    {
+        var claims = await _jwt.ValidateAsync(challengeToken, JwtTokenService.MfaChallengePurpose);
+        return claims is null ? null : await _webAuthn.BeginAssertionAsync(claims.UserId, ct);
+    }
+
+    public async Task<LoginResult> VerifyWebAuthnAsync(string challengeToken, string assertionResponseJson, string? ip, string? userAgent, CancellationToken ct = default)
+    {
+        var claims = await _jwt.ValidateAsync(challengeToken, JwtTokenService.MfaChallengePurpose);
+        if (claims is null)
+        {
+            return LoginResult.Failure();
+        }
+
+        var user = await _db.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == claims.UserId, ct);
+
+        if (user is null)
+        {
+            return LoginResult.Failure();
+        }
+
+        if (IsLockedOut(user))
+        {
+            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
+        if (!await _webAuthn.CompleteAssertionAsync(user.Id, assertionResponseJson, ct))
+        {
+            await RegisterFailedAttemptAsync(user, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
+        ResetLockoutState(user);
+
+        return await IssueSessionAsync(user, ip, userAgent, ct);
+    }
+
+    private async Task<IReadOnlyList<MfaFactor>> AvailableFactorsAsync(User user, CancellationToken ct)
     {
         var factors = new List<MfaFactor>();
         if (user.MfaEnabled)
@@ -246,6 +296,13 @@ internal sealed class AuthenticationService : IAuthenticationService
         if (user.MfaEmailOtpEnabled)
         {
             factors.Add(MfaFactor.EmailOtp);
+        }
+
+        // No single on/off flag for WebAuthn (unlike the other two factors): a user may register
+        // several credentials, and any of them makes the factor available.
+        if (await _db.WebAuthnCredentials.AnyAsync(c => c.UserId == user.Id, ct))
+        {
+            factors.Add(MfaFactor.WebAuthn);
         }
 
         return factors;

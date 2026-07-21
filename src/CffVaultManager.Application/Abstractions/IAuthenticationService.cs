@@ -42,6 +42,21 @@ public interface IAuthenticationService
     Task<bool> RequestMfaEmailOtpAsync(string challengeToken, string? ip, string? userAgent, CancellationToken ct = default);
 
     /// <summary>
+    /// Starts a WebAuthn assertion for an in-progress MFA challenge and returns the
+    /// <c>AssertionOptions</c> JSON the client needs for <c>navigator.credentials.get()</c>. Null
+    /// if the challenge token itself is missing/invalid/expired, or the user has no registered
+    /// credential to assert against.
+    /// </summary>
+    Task<string?> RequestWebAuthnAssertionOptionsAsync(string challengeToken, CancellationToken ct = default);
+
+    /// <summary>
+    /// Completes an MFA challenge with a WebAuthn assertion response — a separate method from
+    /// <see cref="VerifyMfaAsync"/> because the payload is a structured JSON object, not a short
+    /// typed code. On success returns the full session.
+    /// </summary>
+    Task<LoginResult> VerifyWebAuthnAsync(string challengeToken, string assertionResponseJson, string? ip, string? userAgent, CancellationToken ct = default);
+
+    /// <summary>
     /// Rotates an opaque refresh token and mints a fresh access token for its owner. Returns a
     /// generic failure when the refresh token is unknown, already rotated/revoked, or expired.
     /// </summary>

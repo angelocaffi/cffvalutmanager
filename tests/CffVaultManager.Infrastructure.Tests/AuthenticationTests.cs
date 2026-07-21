@@ -6,6 +6,7 @@ using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure;
 using CffVaultManager.Infrastructure.Authentication;
 using CffVaultManager.Infrastructure.Persistence;
+using Fido2NetLib;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public sealed class AuthenticationTests : IDisposable
     private readonly IAuthHashHasher _authHashHasher;
     private readonly ITotpService _totp;
     private readonly ISecretProtector _secretProtector;
+    private readonly IFido2 _fido2 = WebAuthnTestConfig.CreateFido2();
 
     // Deliberately tiny Argon2 cost: security is validated in the Crypto tests; here we only need
     // the salted-rehash behaviour to work, not a production cost.
@@ -574,6 +576,246 @@ public sealed class AuthenticationTests : IDisposable
         var result = await auth.VerifyMfaAsync(challenge, "123456", MfaFactor.EmailOtp, null, null);
 
         Assert.False(result.Success);
+    }
+
+    // ---- WebAuthn/Passkey as an MFA factor ----------------------------------------------------
+
+    [Fact]
+    public async Task Registration_with_a_valid_attestation_stores_the_credential()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        var authenticator = new FakeWebAuthnAuthenticator();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new WebAuthnService(ctx, _fido2);
+
+        string optionsJson = await service.BeginRegistrationAsync(adminId);
+        var options = CredentialCreateOptions.FromJson(optionsJson);
+        string attestationResponse = authenticator.CreateAttestationResponseJson(options, WebAuthnTestConfig.Origin);
+
+        Guid credentialId = await service.CompleteRegistrationAsync(adminId, attestationResponse, "My device");
+
+        var stored = await ctx.WebAuthnCredentials.SingleAsync(c => c.Id == credentialId);
+        Assert.Equal(adminId, stored.UserId);
+        Assert.Equal("My device", stored.Nickname);
+        Assert.Equal(authenticator.CredentialId, stored.CredentialId);
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.WebAuthnCredentialRegistered));
+    }
+
+    [Fact]
+    public async Task CompleteRegistrationAsync_without_a_pending_ceremony_throws()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        var authenticator = new FakeWebAuthnAuthenticator();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new WebAuthnService(ctx, _fido2);
+
+        // Fabricate options as if BeginRegistrationAsync had been called, but never actually call
+        // it — no ceremony row exists for CompleteRegistrationAsync to find.
+        var options = _fido2.RequestNewCredential(new RequestNewCredentialParams
+        {
+            User = new Fido2NetLib.Fido2User { Id = adminId.ToByteArray(), Name = "admin@x.com", DisplayName = "admin@x.com" },
+            AttestationPreference = Fido2NetLib.Objects.AttestationConveyancePreference.None,
+            PubKeyCredParams = Fido2NetLib.PubKeyCredParam.Defaults,
+        });
+        string attestationResponse = authenticator.CreateAttestationResponseJson(options, WebAuthnTestConfig.Origin);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteRegistrationAsync(adminId, attestationResponse, null));
+    }
+
+    [Fact]
+    public async Task Login_with_a_registered_webauthn_credential_returns_a_challenge_listing_that_factor()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await RegisterWebAuthnCredentialAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.False(result.Success);
+        Assert.True(result.RequiresMfa);
+        Assert.Equal(new[] { MfaFactor.WebAuthn }, result.AvailableMfaFactors);
+    }
+
+    [Fact]
+    public async Task Full_webauthn_challenge_request_then_verify_with_a_valid_assertion_issues_a_session()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId, authenticator) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+
+        string? optionsJson = await auth.RequestWebAuthnAssertionOptionsAsync(challenge);
+        Assert.NotNull(optionsJson);
+        var options = AssertionOptions.FromJson(optionsJson);
+        authenticator.SignCount++; // a real authenticator's counter strictly increases on every use.
+        string assertionResponse = authenticator.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, adminId.ToByteArray());
+
+        var result = await auth.VerifyWebAuthnAsync(challenge, assertionResponse, null, null);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
+        Assert.NotNull(result.CryptoMaterials);
+    }
+
+    [Fact]
+    public async Task VerifyWebAuthnAsync_with_a_tampered_signature_fails_and_counts_toward_lockout()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId, authenticator) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+        string? optionsJson = await auth.RequestWebAuthnAssertionOptionsAsync(challenge);
+        var options = AssertionOptions.FromJson(optionsJson!);
+
+        authenticator.SignCount++;
+        string assertionResponse = authenticator.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, adminId.ToByteArray());
+        string tamperedResponse = TamperSignature(assertionResponse);
+
+        var result = await auth.VerifyWebAuthnAsync(challenge, tamperedResponse, null, null);
+
+        Assert.False(result.Success);
+
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.Equal(1, user.FailedLoginAttempts);
+    }
+
+    [Fact]
+    public async Task RequestWebAuthnAssertionOptionsAsync_with_an_invalid_challenge_token_returns_null()
+    {
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        Assert.Null(await auth.RequestWebAuthnAssertionOptionsAsync("not-a-real-token"));
+    }
+
+    [Fact]
+    public async Task BeginAssertionAsync_for_a_user_with_no_registered_credential_returns_null()
+    {
+        var authHash = RandomAuthHash();
+        var (_, adminId) = await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null));
+        // MFA was never enabled for this user at all, so login succeeds outright — confirms
+        // BeginAssertionAsync's "nothing to assert against" null path is exercised directly instead.
+        Assert.True(challenge.Success);
+
+        using var direct = CreateContext(Unresolved());
+        Assert.Null(await new WebAuthnService(direct, _fido2).BeginAssertionAsync(adminId));
+    }
+
+    [Fact]
+    public async Task ListCredentialsAsync_returns_only_the_users_own_credentials()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        Guid credentialId;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new WebAuthnService(ctx, _fido2);
+            var authenticator = new FakeWebAuthnAuthenticator();
+            string optionsJson = await service.BeginRegistrationAsync(adminId);
+            string attestationResponse = authenticator.CreateAttestationResponseJson(CredentialCreateOptions.FromJson(optionsJson), WebAuthnTestConfig.Origin);
+            credentialId = await service.CompleteRegistrationAsync(adminId, attestationResponse, "Laptop");
+        }
+
+        using var verify = CreateContext(Tenant(tenantId, adminId));
+        var list = await new WebAuthnService(verify, _fido2).ListCredentialsAsync(adminId);
+
+        var dto = Assert.Single(list);
+        Assert.Equal(credentialId, dto.Id);
+        Assert.Equal("Laptop", dto.Nickname);
+    }
+
+    [Fact]
+    public async Task RemoveCredentialAsync_removes_the_factor_availability()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId, _) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(authHash);
+
+        Guid credentialId;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            credentialId = (await new WebAuthnService(ctx, _fido2).ListCredentialsAsync(adminId)).Single().Id;
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new WebAuthnService(ctx, _fido2).RemoveCredentialAsync(adminId, credentialId);
+        }
+
+        using var verify = CreateContext(Unresolved());
+        var auth = CreateAuthService(verify);
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.True(result.Success);
+        Assert.False(result.RequiresMfa);
+
+        using var superAdminCtx = CreateContext(SuperAdmin());
+        Assert.True(await superAdminCtx.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.WebAuthnCredentialRemoved));
+    }
+
+    [Fact]
+    public async Task RemoveCredentialAsync_for_another_users_credential_is_a_noop()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+        var operatorId = await RegisterOperatorAsync(tenantId, adminId);
+
+        Guid credentialId;
+        using (var ctx = CreateContext(Tenant(tenantId, operatorId)))
+        {
+            var service = new WebAuthnService(ctx, _fido2);
+            var authenticator = new FakeWebAuthnAuthenticator();
+            string optionsJson = await service.BeginRegistrationAsync(operatorId);
+            string attestationResponse = authenticator.CreateAttestationResponseJson(CredentialCreateOptions.FromJson(optionsJson), WebAuthnTestConfig.Origin);
+            credentialId = await service.CompleteRegistrationAsync(operatorId, attestationResponse, null);
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            // The Admin tries to remove the Operator's credential by ID — must be a no-op.
+            await new WebAuthnService(ctx, _fido2).RemoveCredentialAsync(adminId, credentialId);
+        }
+
+        using var verify = CreateContext(Tenant(tenantId, operatorId));
+        var stillThere = await new WebAuthnService(verify, _fido2).ListCredentialsAsync(operatorId);
+        Assert.Single(stillThere);
+    }
+
+    private async Task<(Guid TenantId, Guid AdminId)> RegisterWebAuthnCredentialAsync(byte[] authHash)
+    {
+        var (tenantId, adminId, _) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(authHash);
+        return (tenantId, adminId);
+    }
+
+    private async Task<(Guid TenantId, Guid AdminId, FakeWebAuthnAuthenticator Authenticator)> RegisterWebAuthnCredentialWithAuthenticatorAsync(byte[] authHash)
+    {
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var authenticator = new FakeWebAuthnAuthenticator();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new WebAuthnService(ctx, _fido2);
+        string optionsJson = await service.BeginRegistrationAsync(adminId);
+        var options = CredentialCreateOptions.FromJson(optionsJson);
+        string attestationResponse = authenticator.CreateAttestationResponseJson(options, WebAuthnTestConfig.Origin);
+        await service.CompleteRegistrationAsync(adminId, attestationResponse, null);
+
+        return (tenantId, adminId, authenticator);
     }
 
     [Fact]
@@ -1210,7 +1452,7 @@ public sealed class AuthenticationTests : IDisposable
 
     private AuthenticationService CreateAuthService(CffVaultManagerDbContext ctx, IEmailSender emailSender) =>
         new(ctx, _authHashHasher, _jwt, new RefreshTokenService(ctx), _totp, _secretProtector,
-            new EmailOtpMfaService(ctx, emailSender));
+            new EmailOtpMfaService(ctx, emailSender), new WebAuthnService(ctx, _fido2));
 
     private async Task<(Guid TenantId, Guid AdminId)> ProvisionAsync(byte[] authHash)
     {
@@ -1299,6 +1541,20 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     private static string ExtractCode(string body) => Regex.Match(body, @"\d{6}").Value;
+
+    // Flips a bit in the assertion response's signature so the same, otherwise-valid response
+    // fails cryptographic verification — used to prove a tampered/forged assertion is rejected.
+    private static string TamperSignature(string assertionResponseJson)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(assertionResponseJson)!;
+        string signatureBase64Url = node["response"]!["signature"]!.GetValue<string>();
+        byte[] signature = Convert.FromBase64String(Pad(signatureBase64Url.Replace('-', '+').Replace('_', '/')));
+        signature[0] ^= 0xFF;
+        node["response"]!["signature"] = Convert.ToBase64String(signature).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return node.ToJsonString();
+
+        static string Pad(string s) => s + new string('=', (4 - s.Length % 4) % 4);
+    }
 
     private sealed class FakeEmailSender : IEmailSender
     {

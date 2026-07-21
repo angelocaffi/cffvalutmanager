@@ -2,6 +2,7 @@ using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Domain.Enums;
 using Microsoft.AspNetCore.RateLimiting;
+using static CffVaultManager.Api.Endpoints.RequestContext;
 
 namespace CffVaultManager.Api.Endpoints;
 
@@ -175,11 +176,6 @@ internal static class AuthEndpoints
 
         return app;
     }
-
-    private static string? ClientIp(HttpContext http) => http.Connection.RemoteIpAddress?.ToString();
-
-    private static string? UserAgent(HttpContext http) =>
-        http.Request.Headers.UserAgent.Count > 0 ? http.Request.Headers.UserAgent.ToString() : null;
 }
 
 internal sealed record PreloginRequest(string Email);

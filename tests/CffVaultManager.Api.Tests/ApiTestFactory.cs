@@ -20,6 +20,11 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
 {
     public const string JwtSigningKey = "test-signing-key-that-is-comfortably-long-enough-0123456789abcdef";
 
+    /// <summary>Must match what <see cref="FakeWebAuthnAuthenticator"/> signs its fake responses for.</summary>
+    public const string WebAuthnRpId = "localhost";
+
+    public const string WebAuthnOrigin = "https://localhost:5001";
+
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
 
     /// <summary>The fake registered in place of the real (logging-only) <see cref="IEmailSender"/> — read back to observe one-time codes that would have been emailed.</summary>
@@ -34,6 +39,9 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Jwt:SigningKey"] = JwtSigningKey,
+                ["WebAuthn:RelyingPartyId"] = WebAuthnRpId,
+                ["WebAuthn:ServerName"] = "Test",
+                ["WebAuthn:Origins:0"] = WebAuthnOrigin,
             });
         });
 
