@@ -26,6 +26,8 @@ Entità principali (nomi indicativi, da raffinare in fase di implementazione). T
 | EncryptedDek | DEK cifrata con la KEK derivata dalla master password |
 | MfaEnabled / MfaSecret | secret TOTP **[cifrato]** |
 | MfaEmailOtpEnabled | bool — abilita l'Email OTP come fattore MFA aggiuntivo/alternativo al TOTP (vedi [features/authentication.md](features/authentication.md)) |
+| PublicKey | nullable — chiave pubblica X25519 (32 byte), in chiaro per definizione; usata per condividere DEK di vault di organizzazione (vedi [features/sharing-access-control.md](features/sharing-access-control.md)) |
+| EncryptedPrivateKey | nullable **[cifrato]** — chiave privata X25519 cifrata con la propria DEK (non una KEK separata), come qualunque altro secret dell'utente |
 | CreatedAt / LastLoginAt | |
 
 > Nota: `SuperAdmin` non ha `TenantId` perché non appartiene a un'organizzazione — ha comunque una propria master password e una propria DEK per il proprio vault personale (se previsto), ma nessun accesso ai vault dei tenant.
@@ -58,6 +60,25 @@ Contenitore logico di secrets: vault personale di un utente o vault condiviso di
 | OwnerUserId | FK a User, nullable se `IsOrganizationVault = true` |
 | IsOrganizationVault | bool — se true, l'accesso è governato da inviti espliciti cifrati asimmetricamente, non da ownership singola |
 | Name | nome del vault (es. "Personale", "IT Team") |
+
+## VaultMembership **[tenant-scoped]**
+
+Accesso di un utente a un vault di organizzazione (mai a un vault personale, che resta ownership-only). La DEK del vault non esiste mai come colonna cifrata unica sul `Vault`: esiste solo come N copie indipendenti, una per membro attivo, qui. Vedi [features/sharing-access-control.md](features/sharing-access-control.md) per lo schema crittografico completo (X25519 + HKDF-SHA256 + AES-256-GCM).
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant (denormalizzato) |
+| VaultId | FK a Vault — deve avere `IsOrganizationVault = true` |
+| UserId | FK a User — deve appartenere allo stesso Tenant del Vault |
+| Permission | enum: `Read`, `ReadWrite` |
+| WrappedVaultDek | **[cifrato]** — DEK del vault cifrata per questo membro (AES-256-GCM con chiave derivata via ECDH+HKDF dalla sua chiave pubblica) |
+| EphemeralPublicKey | chiave pubblica X25519 effimera del mittente usata per questo specifico wrapping — non riutilizzata tra membership |
+| InvitedByUserId | FK a User — chi ha eseguito l'invito |
+| CreatedAt | |
+| RevokedAt | nullable — la riga resta per audit anche dopo la revoca; solo `RevokedAt IS NULL` conta come accesso attivo |
+
+> Nota: indice univoco filtrato `(TenantId, VaultId, UserId) WHERE RevokedAt IS NULL` — al più una membership attiva per utente per vault, ma una nuova membership dopo una revoca è ammessa (nuova riga).
 
 ## VaultItem (entità base per password / carte / secrets generici) **[tenant-scoped]**
 
@@ -108,7 +129,7 @@ Contenitore logico di secrets: vault personale di un utente o vault condiviso di
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `LoginSuccess`, `LoginFailed`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `UserRoleChanged` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `UserRoleChanged` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
@@ -120,6 +141,7 @@ Tenant 1---N Vault 1---N VaultItem N---1 Folder
 User 1---N AuditLogEntry
 User 1---N OneTimeCode
 VaultItem N---N Tag
+Vault 1---N VaultMembership N---1 User (solo vault di organizzazione)
 ```
 
 ## Note di implementazione

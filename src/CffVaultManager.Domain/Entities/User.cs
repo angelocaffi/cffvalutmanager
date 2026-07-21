@@ -157,6 +157,20 @@ public class User
 
     public DateTimeOffset? LastLoginAt { get; set; }
 
+    /// <summary>
+    /// The user's long-term X25519 public key for organization-vault sharing. Null until the
+    /// user's client generates a keypair (lazily on first login after this feature ships, or at
+    /// registration for new users going forward). Public key material — not a secret.
+    /// </summary>
+    public byte[]? PublicKey { get; set; }
+
+    /// <summary>
+    /// The user's X25519 private key, wrapped client-side with the user's own DEK (not a separate
+    /// KEK) exactly like any other secret they own, so the server never sees it in the clear. Null
+    /// until the client generates a keypair.
+    /// </summary>
+    public byte[]? EncryptedPrivateKey { get; set; }
+
     public ICollection<OneTimeCode> OneTimeCodes { get; } = new List<OneTimeCode>();
 
     public ICollection<AuditLogEntry> AuditLogEntries { get; } = new List<AuditLogEntry>();

@@ -7,6 +7,7 @@ public enum AuditAction
     Updated,
     Deleted,
     Shared,
+    Revoked,
     Revealed,
     MfaEnabled,
     LoginSuccess,

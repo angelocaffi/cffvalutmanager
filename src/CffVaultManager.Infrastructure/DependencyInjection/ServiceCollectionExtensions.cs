@@ -45,6 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFolderService, FolderService>();
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IVaultItemService, VaultItemService>();
+        services.AddScoped<IVaultMembershipService, VaultMembershipService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
 
         return services;

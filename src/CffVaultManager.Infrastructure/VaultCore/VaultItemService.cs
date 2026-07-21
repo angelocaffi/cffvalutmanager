@@ -1,5 +1,6 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -8,9 +9,11 @@ using Microsoft.EntityFrameworkCore;
 namespace CffVaultManager.Infrastructure.VaultCore;
 
 /// <summary>
-/// Vault-item management (including the soft-delete trash lifecycle) scoped to a caller-owned
-/// personal vault. Ownership is enforced through <see cref="VaultAccessGuard"/>; the encrypted
-/// payload is stored and returned verbatim and is never decrypted server-side.
+/// Vault-item management (including the soft-delete trash lifecycle) scoped to a vault the caller
+/// can access — either a personal vault they own or an organization vault they are an active member
+/// of. Access and effective permission are resolved through <see cref="VaultAccessGuard"/>; write
+/// operations require <see cref="VaultPermission.ReadWrite"/>. The encrypted payload is stored and
+/// returned verbatim and is never decrypted server-side.
 /// </summary>
 internal sealed class VaultItemService : IVaultItemService
 {
@@ -20,7 +23,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<VaultItemDto> CreateAsync(Guid vaultId, Guid callerId, CreateVaultItemRequest request, CancellationToken ct = default)
     {
-        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         if (request.FolderId is not null &&
             !await _db.Folders.AnyAsync(f => f.Id == request.FolderId && f.VaultId == vaultId, ct))
@@ -39,7 +43,7 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<VaultItemDto> GetAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, _) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -54,7 +58,7 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<IReadOnlyList<VaultItemDto>> ListAsync(Guid vaultId, Guid callerId, VaultItemListQuery query, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
 
         IQueryable<VaultItem> q = _db.VaultItems.Where(i => i.VaultId == vaultId && !i.IsDeleted);
 
@@ -102,7 +106,7 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<IReadOnlyList<VaultItemDto>> ListTrashAsync(Guid vaultId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
 
         var items = await _db.VaultItems
             .Where(i => i.VaultId == vaultId && i.IsDeleted)
@@ -117,7 +121,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<VaultItemDto> UpdateAsync(Guid vaultId, Guid itemId, Guid callerId, UpdateVaultItemRequest request, CancellationToken ct = default)
     {
-        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -147,7 +152,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task SoftDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -159,7 +165,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task RestoreAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -170,7 +177,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task PermanentlyDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -186,7 +194,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task AssignTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
         {
@@ -207,7 +216,8 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task RemoveTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
         {
@@ -224,7 +234,7 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task RecordRevealAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, _) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
 
         if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
         {

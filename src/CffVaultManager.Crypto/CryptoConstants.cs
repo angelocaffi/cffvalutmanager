@@ -5,6 +5,9 @@ public static class CryptoConstants
     /// <summary>Symmetric key length in bytes (AES-256 / KEK / DEK).</summary>
     public const int KeyLengthBytes = 32;
 
+    /// <summary>X25519 public/private key length in bytes.</summary>
+    public const int X25519KeyLengthBytes = 32;
+
     /// <summary>AES-GCM nonce length in bytes.</summary>
     public const int GcmNonceLengthBytes = 12;
 

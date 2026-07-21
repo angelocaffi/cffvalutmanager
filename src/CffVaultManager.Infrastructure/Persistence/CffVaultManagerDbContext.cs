@@ -30,6 +30,8 @@ public class CffVaultManagerDbContext : DbContext
 
     public DbSet<VaultItem> VaultItems => Set<VaultItem>();
 
+    public DbSet<VaultMembership> VaultMemberships => Set<VaultMembership>();
+
     public DbSet<Folder> Folders => Set<Folder>();
 
     public DbSet<Tag> Tags => Set<Tag>();
@@ -52,6 +54,7 @@ public class CffVaultManagerDbContext : DbContext
         modelBuilder.ApplyConfiguration(new UserConfiguration(this));
         modelBuilder.ApplyConfiguration(new VaultConfiguration(this));
         modelBuilder.ApplyConfiguration(new VaultItemConfiguration(this));
+        modelBuilder.ApplyConfiguration(new VaultMembershipConfiguration(this));
         modelBuilder.ApplyConfiguration(new FolderConfiguration(this));
         modelBuilder.ApplyConfiguration(new TagConfiguration(this));
         modelBuilder.ApplyConfiguration(new VaultItemTagConfiguration(this));
