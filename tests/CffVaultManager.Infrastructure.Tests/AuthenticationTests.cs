@@ -707,6 +707,119 @@ public sealed class AuthenticationTests : IDisposable
                 Guid.NewGuid(), UserRole.Operator, tenantId));
     }
 
+    [Fact]
+    public async Task ChangeMasterPasswordAsync_with_correct_current_authhash_replaces_crypto_material_and_writes_audit()
+    {
+        var oldAuthHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(oldAuthHash);
+
+        var newAuthHash = RandomAuthHash();
+        byte[] newDek = { 99, 98, 97, 96 };
+        byte[] newSalt = Enumerable.Repeat((byte)7, 16).ToArray();
+        var request = new ChangeMasterPasswordRequest(
+            CurrentAuthHash: oldAuthHash,
+            NewAuthHash: newAuthHash,
+            NewEncryptedDek: newDek,
+            NewMasterPasswordSalt: newSalt,
+            NewKdfMemoryKb: 32768,
+            NewKdfIterations: 4,
+            NewKdfVersion: 2);
+
+        bool changed;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new ChangeMasterPasswordService(ctx, _authHashHasher, new RefreshTokenService(ctx));
+            changed = await service.ChangeMasterPasswordAsync(adminId, request);
+        }
+
+        Assert.True(changed);
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.Equal(newDek, user.EncryptedDek);
+        Assert.Equal(newSalt, user.MasterPasswordSalt);
+        Assert.Equal(32768, user.KdfMemoryKb);
+        Assert.Equal(4, user.KdfIterations);
+        Assert.Equal(2, user.KdfVersion);
+        Assert.False(_authHashHasher.Verify(oldAuthHash, user.MasterPasswordHash!));
+        Assert.True(_authHashHasher.Verify(newAuthHash, user.MasterPasswordHash!));
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.MasterPasswordChanged));
+
+        // Login only works with the new auth hash from now on.
+        using var loginCtx = CreateContext(Unresolved());
+        var auth = CreateAuthService(loginCtx);
+        Assert.False((await auth.LoginAsync("admin@x.com", oldAuthHash, null, null)).Success);
+        Assert.True((await auth.LoginAsync("admin@x.com", newAuthHash, null, null)).Success);
+    }
+
+    [Fact]
+    public async Task ChangeMasterPasswordAsync_with_wrong_current_authhash_returns_false_and_makes_no_changes()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        var request = new ChangeMasterPasswordRequest(
+            CurrentAuthHash: RandomAuthHash(),
+            NewAuthHash: RandomAuthHash(),
+            NewEncryptedDek: new byte[] { 1, 2, 3 },
+            NewMasterPasswordSalt: Enumerable.Repeat((byte)9, 16).ToArray(),
+            NewKdfMemoryKb: 32768,
+            NewKdfIterations: 4,
+            NewKdfVersion: 2);
+
+        bool changed;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new ChangeMasterPasswordService(ctx, _authHashHasher, new RefreshTokenService(ctx));
+            changed = await service.ChangeMasterPasswordAsync(adminId, request);
+        }
+
+        Assert.False(changed);
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.Equal(Dek, user.EncryptedDek);
+        Assert.Equal(Salt, user.MasterPasswordSalt);
+        Assert.True(_authHashHasher.Verify(authHash, user.MasterPasswordHash!));
+
+        Assert.False(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.MasterPasswordChanged));
+    }
+
+    [Fact]
+    public async Task ChangeMasterPasswordAsync_revokes_every_active_session_on_success()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        IssuedRefreshToken session;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            session = await new RefreshTokenService(ctx).IssueAsync(adminId, null, null);
+        }
+
+        var request = new ChangeMasterPasswordRequest(
+            CurrentAuthHash: authHash,
+            NewAuthHash: RandomAuthHash(),
+            NewEncryptedDek: new byte[] { 4, 5, 6 },
+            NewMasterPasswordSalt: Enumerable.Repeat((byte)3, 16).ToArray(),
+            NewKdfMemoryKb: 32768,
+            NewKdfIterations: 4,
+            NewKdfVersion: 2);
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new ChangeMasterPasswordService(ctx, _authHashHasher, new RefreshTokenService(ctx));
+            Assert.True(await service.ChangeMasterPasswordAsync(adminId, request));
+        }
+
+        using var verifyCtx = CreateContext(Tenant(tenantId, adminId));
+        var refreshTokens = new RefreshTokenService(verifyCtx);
+        Assert.Null(await refreshTokens.ValidateAndRotateAsync(session.PlainToken, null, null));
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private CffVaultManagerDbContext CreateContext(ITenantContext tenantContext)

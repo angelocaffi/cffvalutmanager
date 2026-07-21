@@ -23,4 +23,5 @@ public enum AuditAction
     TenantReactivated,
     UserRoleChanged,
     PermanentlyDeleted,
+    MasterPasswordChanged,
 }

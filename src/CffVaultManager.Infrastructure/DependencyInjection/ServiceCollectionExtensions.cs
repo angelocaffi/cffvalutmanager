@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRegistrationService, UserRegistrationService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IMfaSetupService, MfaSetupService>();
+        services.AddScoped<IChangeMasterPasswordService, ChangeMasterPasswordService>();
         services.AddScoped<IVaultService, VaultService>();
         services.AddScoped<IFolderService, FolderService>();
         services.AddScoped<ITagService, TagService>();

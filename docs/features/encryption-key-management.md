@@ -29,4 +29,8 @@ Fornire l'implementazione concreta della gerarchia di chiavi definita in [../sec
 
 ## Stato
 
-Implementato in `CffVaultManager.Crypto`: derivazione Argon2id, generazione/cifratura DEK, `AesGcmCipherService` (ora su BouncyCastle per compatibilità WASM, vedi sopra), 122 test. Manca ancora: la rotazione DEK e il cambio master password come procedure applicative complete (i primitivi crittografici che servirebbero loro esistono già).
+Implementato in `CffVaultManager.Crypto`: derivazione Argon2id, generazione/cifratura DEK, `AesGcmCipherService` (ora su BouncyCastle per compatibilità WASM, vedi sopra), 134 test.
+
+**Cambio master password**: procedura applicativa completa (Fase 2), non solo i primitivi — vedi [authentication.md](authentication.md) per l'endpoint/servizio. Ri-cifra solo la DEK come richiesto qui sopra: il client sblocca la DEK esistente con la vecchia KEK, ne deriva una nuova dalla nuova master password e ri-wrappa la stessa DEK, senza mai ri-cifrare un `VaultItem`.
+
+Manca ancora: la rotazione DEK come procedura applicativa completa (i primitivi crittografici che le servirebbero esistono già — stesso `IDekService`/`IAeadCipherService` usati dal cambio master password).

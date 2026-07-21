@@ -63,6 +63,18 @@ internal static class AuthEndpoints
             return confirmed ? Results.Ok() : Results.BadRequest();
         }).RequireAuthorization();
 
+        // Re-encrypts only the DEK (never a vault item) — see docs/security-model.md and
+        // ChangeMasterPasswordService. Success revokes every active session (including the
+        // caller's own), so every device must re-authenticate with the new master password.
+        app.MapPost("/api/auth/change-master-password", async (
+            ChangeMasterPasswordRequest request, IChangeMasterPasswordService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            bool changed = await service.ChangeMasterPasswordAsync(tenantContext.UserId!.Value, request, ct);
+            return changed
+                ? Results.NoContent()
+                : Results.Json(new { error = "Current master password is incorrect." }, statusCode: StatusCodes.Status401Unauthorized);
+        }).RequireAuthorization();
+
         // "Logout remoto" (docs/features/authentication.md): lists/revokes the caller's own
         // refresh-token sessions. Revoking a session blocks future silent renewal via /refresh, but
         // an already-issued access token remains valid until its own short expiry (15 min) —
