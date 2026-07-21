@@ -24,4 +24,8 @@ Tracciare le azioni compiute sul vault per rilevare accessi anomali e fornire tr
 
 ## Stato
 
-Da pianificare.
+- Scrittura eventi: `AuditLogEntry` (già esistente da Fase 0) viene ora popolata anche per le azioni sul vault — `VaultItemService` scrive `Created`/`Viewed`/`Updated`/`Deleted` (soft-delete) per ogni voce; `MfaSetupService` scrive `MfaEnabled` alla conferma dell'attivazione TOTP. Login/logout/tenant provisioning erano già tracciati da Fase 0.
+- Reveal di campi sensibili: il server non vede mai il contenuto, quindi non può osservare da solo quando un campo viene mostrato. Nuovo evento `Revealed` + endpoint esplicito `POST /api/vaults/{vaultId}/items/{itemId}/reveal`, che il client (quando esisterà) dovrà richiamare al click su "mostra".
+- Lettura: `GET /api/audit` (filtri `action`, `from`, `to`, `skip`, `take`) tramite `IAuditLogService`. Visibilità secondo [roles-permissions.md](roles-permissions.md): Admin vede tutte le voci del tenant, Operator solo le proprie. SuperAdmin escluso da questo endpoint — l'audit di piattaforma è parte della Dashboard SuperAdmin, non ancora implementata.
+- Ogni voce referenzia solo `VaultItemId` (mai il contenuto); il titolo/nome della voce, essendo dentro `EncryptedPayload`, va risolto lato client dopo decifratura per costruire messaggi tipo "Password 'GitHub' modificata".
+- Da fare: vista utente "Attività recenti" (Blazor), retention/rotazione configurabile (default 90 giorni, poi archiviazione), notifica email per eventi critici (v2, collegato a [notifications.md](notifications.md)).

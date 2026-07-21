@@ -80,6 +80,13 @@ internal static class VaultItemsEndpoints
                 return Results.NoContent();
             }));
 
+        group.MapPost("/{itemId:guid}/reveal", (Guid vaultId, Guid itemId, IVaultItemService service, ITenantContext tenantContext, CancellationToken ct) =>
+            VaultCoreEndpointHelpers.ExecuteAsync(async () =>
+            {
+                await service.RecordRevealAsync(vaultId, itemId, tenantContext.UserId!.Value, ct);
+                return Results.NoContent();
+            }));
+
         group.MapPost("/{itemId:guid}/tags/{tagId:guid}", (Guid vaultId, Guid itemId, Guid tagId, IVaultItemService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
             {

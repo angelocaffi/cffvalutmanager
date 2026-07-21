@@ -1,6 +1,7 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 using CffVaultManager.Domain.Entities;
+using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,7 @@ internal sealed class VaultItemService : IVaultItemService
         var item = new VaultItem(
             Guid.NewGuid(), vault.TenantId, vaultId, request.Type, request.EncryptedPayload, request.FolderId, request.IsFavorite);
         _db.VaultItems.Add(item);
+        WriteAudit(vault.TenantId, callerId, AuditAction.Created, item.Id);
         await _db.SaveChangesAsync(ct);
 
         return ToDto(item, Array.Empty<Guid>());
@@ -37,12 +39,13 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<VaultItemDto> GetAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
 
         item.LastAccessedAt = DateTimeOffset.UtcNow;
+        WriteAudit(vault.TenantId, callerId, AuditAction.Viewed, item.Id);
         await _db.SaveChangesAsync(ct);
 
         var tagIds = await _db.VaultItemTags.Where(t => t.VaultItemId == itemId).Select(t => t.TagId).ToListAsync(ct);
@@ -114,7 +117,7 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task<VaultItemDto> UpdateAsync(Guid vaultId, Guid itemId, Guid callerId, UpdateVaultItemRequest request, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
@@ -135,6 +138,7 @@ internal sealed class VaultItemService : IVaultItemService
         item.FolderId = request.FolderId;
         item.IsFavorite = request.IsFavorite;
         item.UpdatedAt = DateTimeOffset.UtcNow;
+        WriteAudit(vault.TenantId, callerId, AuditAction.Updated, item.Id);
         await _db.SaveChangesAsync(ct);
 
         var tagIds = await _db.VaultItemTags.Where(t => t.VaultItemId == itemId).Select(t => t.TagId).ToListAsync(ct);
@@ -143,12 +147,13 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task SoftDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
 
         item.SoftDelete();
+        WriteAudit(vault.TenantId, callerId, AuditAction.Deleted, item.Id);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -216,6 +221,22 @@ internal sealed class VaultItemService : IVaultItemService
             await _db.SaveChangesAsync(ct);
         }
     }
+
+    public async Task RecordRevealAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
+    {
+        var vault = await VaultAccessGuard.GetOwnedPersonalVaultAsync(_db, vaultId, callerId, ct);
+
+        if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
+        {
+            throw new KeyNotFoundException("Item not found.");
+        }
+
+        WriteAudit(vault.TenantId, callerId, AuditAction.Revealed, itemId);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private void WriteAudit(Guid tenantId, Guid callerId, AuditAction action, Guid vaultItemId) =>
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, action, vaultItemId));
 
     private static VaultItemDto ToDto(VaultItem item, IReadOnlyList<Guid> tagIds) => new(
         item.Id, item.Type, item.EncryptedPayload, item.FolderId, item.IsFavorite, tagIds,

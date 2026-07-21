@@ -42,6 +42,7 @@ app.MapVaultEndpoints();
 app.MapFolderEndpoints();
 app.MapTagEndpoints();
 app.MapVaultItemEndpoints();
+app.MapAuditEndpoints();
 
 app.Run();
 

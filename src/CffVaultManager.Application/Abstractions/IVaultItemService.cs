@@ -29,4 +29,11 @@ public interface IVaultItemService
     Task AssignTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default);
 
     Task RemoveTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that a sensitive field (password, card number, CVV, ...) was revealed in the
+    /// client. The server cannot observe this itself — it never sees plaintext — so the client
+    /// calls this explicitly after the user reveals a field, per docs/features/audit-log.md.
+    /// </summary>
+    Task RecordRevealAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default);
 }

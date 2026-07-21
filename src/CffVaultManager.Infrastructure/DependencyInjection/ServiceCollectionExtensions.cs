@@ -2,6 +2,7 @@ using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Crypto;
 using CffVaultManager.Crypto.Abstractions;
 using CffVaultManager.Infrastructure.Administration;
+using CffVaultManager.Infrastructure.Audit;
 using CffVaultManager.Infrastructure.Authentication;
 using CffVaultManager.Infrastructure.Persistence;
 using CffVaultManager.Infrastructure.VaultCore;
@@ -44,6 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFolderService, FolderService>();
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IVaultItemService, VaultItemService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
 
         return services;
     }

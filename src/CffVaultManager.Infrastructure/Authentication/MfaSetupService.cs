@@ -1,4 +1,6 @@
 using CffVaultManager.Application.Abstractions;
+using CffVaultManager.Domain.Entities;
+using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -54,6 +56,7 @@ internal sealed class MfaSetupService : IMfaSetupService
         }
 
         user.MfaEnabled = true;
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.MfaEnabled));
         await _db.SaveChangesAsync(ct);
         return true;
     }
