@@ -1,0 +1,177 @@
+@page "/activity"
+@attribute [Authorize]
+@using CffVaultManager.Web.Client.Services
+@inject AuditApiClient AuditApi
+
+<PageTitle>Attività recenti</PageTitle>
+
+<h1 class="h3 mb-4">Attività recenti</h1>
+
+<p class="text-body-secondary small">
+    Registro delle azioni sul tuo account e sui tuoi vault (non include mai il contenuto dei
+    secrets). Se il tuo ruolo è Admin, vedi anche le azioni di tutto il tenant.
+</p>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <select class="form-select" style="max-width: 16rem;" @bind="_actionFilter" @bind:after="ReloadAsync">
+        <option value="">Tutte le azioni</option>
+        @foreach (var action in _filterableActions)
+        {
+            <option value="@action">@Label(action)</option>
+        }
+    </select>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+}
+
+@if (_entries is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_entries.Count == 0)
+{
+    <p class="text-body-secondary">Nessuna attività da mostrare.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Quando</th>
+                    <th>Azione</th>
+                    <th>Indirizzo IP</th>
+                    <th>Dispositivo</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td class="text-nowrap">@entry.Timestamp.ToLocalTime().ToString("g")</td>
+                        <td><span class="badge text-bg-secondary">@Label(entry.Action)</span></td>
+                        <td>@(entry.IpAddress ?? "—")</td>
+                        <td class="text-truncate" style="max-width: 20rem;">@(entry.UserAgent ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(_skip == 0 || _busy)" @onclick="PreviousPageAsync">
+            Precedente
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(_entries.Count < PageSize || _busy)" @onclick="NextPageAsync">
+            Successiva
+        </button>
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private static readonly string[] _filterableActions =
+    [
+        AuditActions.LoginSuccess,
+        AuditActions.LoginFailed,
+        AuditActions.AccountLocked,
+        AuditActions.Created,
+        AuditActions.Viewed,
+        AuditActions.Updated,
+        AuditActions.Deleted,
+        AuditActions.PermanentlyDeleted,
+        AuditActions.Revealed,
+        AuditActions.Shared,
+        AuditActions.Revoked,
+        AuditActions.SessionsRevoked,
+        AuditActions.MasterPasswordChanged,
+        AuditActions.MfaEnabled,
+        AuditActions.MfaEmailOtpEnabled,
+        AuditActions.MfaEmailOtpDisabled,
+        AuditActions.WebAuthnCredentialRegistered,
+        AuditActions.WebAuthnCredentialRemoved,
+    ];
+
+    private IReadOnlyList<AuditLogEntryResponse>? _entries;
+    private string _actionFilter = string.Empty;
+    private int _skip;
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _skip = 0;
+        await LoadPageAsync();
+    }
+
+    private async Task PreviousPageAsync()
+    {
+        _skip = Math.Max(0, _skip - PageSize);
+        await LoadPageAsync();
+    }
+
+    private async Task NextPageAsync()
+    {
+        _skip += PageSize;
+        await LoadPageAsync();
+    }
+
+    private async Task LoadPageAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            _entries = await AuditApi.ListAsync(
+                string.IsNullOrEmpty(_actionFilter) ? null : _actionFilter, _skip, PageSize);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Impossibile caricare il registro attività.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Label(string action) => action switch
+    {
+        AuditActions.Created => "Creazione",
+        AuditActions.Viewed => "Visualizzazione",
+        AuditActions.Updated => "Modifica",
+        AuditActions.Deleted => "Eliminazione (cestino)",
+        AuditActions.Shared => "Condivisione",
+        AuditActions.Revoked => "Revoca condivisione",
+        AuditActions.Revealed => "Rivelazione campo sensibile",
+        AuditActions.MfaEnabled => "MFA (TOTP) abilitata",
+        AuditActions.LoginSuccess => "Accesso riuscito",
+        AuditActions.LoginFailed => "Accesso fallito",
+        AuditActions.AccountLocked => "Account bloccato temporaneamente",
+        AuditActions.SessionsRevoked => "Sessioni revocate",
+        AuditActions.MfaChallenge => "Richiesta MFA",
+        AuditActions.EmailOtpRequested => "Codice Email OTP inviato",
+        AuditActions.EmailOtpVerified => "Codice Email OTP verificato",
+        AuditActions.EmailOtpFailed => "Codice Email OTP errato",
+        AuditActions.TenantProvisioned => "Organizzazione creata",
+        AuditActions.TenantSuspended => "Organizzazione sospesa",
+        AuditActions.TenantReactivated => "Organizzazione riattivata",
+        AuditActions.UserRoleChanged => "Ruolo utente modificato",
+        AuditActions.PermanentlyDeleted => "Eliminazione definitiva",
+        AuditActions.MasterPasswordChanged => "Master password cambiata",
+        AuditActions.MfaEmailOtpEnabled => "MFA Email OTP abilitata",
+        AuditActions.MfaEmailOtpDisabled => "MFA Email OTP disabilitata",
+        AuditActions.WebAuthnCredentialRegistered => "Dispositivo WebAuthn registrato",
+        AuditActions.WebAuthnCredentialRemoved => "Dispositivo WebAuthn rimosso",
+        _ => action,
+    };
+}

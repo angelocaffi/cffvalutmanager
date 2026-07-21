@@ -35,6 +35,7 @@ builder.Services.AddHttpClient("Api", client =>
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("Api"));
 builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
+builder.Services.AddScoped<AuditApiClient>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<TokenRefreshScheduler>();
