@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Domain.Entities;
@@ -31,6 +32,20 @@ internal sealed class AuthenticationService : IAuthenticationService
     private readonly ITotpService _totp;
     private readonly ISecretProtector _secretProtector;
 
+    // A syntactically valid but never-matching stored hash, used so an unknown-email login pays
+    // the same Argon2id cost as a wrong-password attempt against a real account — otherwise
+    // response latency alone lets an attacker distinguish "no such account" from "wrong password"
+    // (timing side-channel; see docs/security-model.md threat #4). Computed via the real hasher
+    // (so its length always matches whatever IAuthHashHasher implementation is in play) but only
+    // ONCE for the process lifetime and cached statically: AuthenticationService itself is
+    // constructed per-request (it holds a scoped DbContext), and paying a full Argon2id cost in
+    // every constructor call — even for requests that never hit the unknown-email branch — would
+    // slow down every login/refresh/MFA-verify call, not just the one path this exists to protect.
+    private static byte[]? _cachedDummyStoredHash;
+    private static readonly object DummyStoredHashLock = new();
+
+    private readonly byte[] _dummyStoredHash;
+
     public AuthenticationService(
         CffVaultManagerDbContext db,
         IAuthHashHasher authHashHasher,
@@ -45,6 +60,20 @@ internal sealed class AuthenticationService : IAuthenticationService
         _refreshTokens = refreshTokens;
         _totp = totp;
         _secretProtector = secretProtector;
+        _dummyStoredHash = GetOrCreateDummyStoredHash(authHashHasher);
+    }
+
+    private static byte[] GetOrCreateDummyStoredHash(IAuthHashHasher hasher)
+    {
+        if (_cachedDummyStoredHash is { } cached)
+        {
+            return cached;
+        }
+
+        lock (DummyStoredHashLock)
+        {
+            return _cachedDummyStoredHash ??= hasher.Hash(RandomNumberGenerator.GetBytes(32));
+        }
     }
 
     public async Task<LoginResult> LoginAsync(string email, byte[] authHash, string? ip, string? userAgent, CancellationToken ct = default)
@@ -57,7 +86,11 @@ internal sealed class AuthenticationService : IAuthenticationService
 
         if (user is null)
         {
-            // Unknown email leaves no trace at all, to avoid confirming which addresses exist.
+            // Unknown email leaves no audit trace, but still pays the same Argon2id cost a real
+            // wrong-password attempt would, against a dummy hash whose result is discarded — a
+            // fast-path return here would otherwise let response latency alone reveal which emails
+            // are registered.
+            _authHashHasher.Verify(authHash, _dummyStoredHash);
             return LoginResult.Failure();
         }
 

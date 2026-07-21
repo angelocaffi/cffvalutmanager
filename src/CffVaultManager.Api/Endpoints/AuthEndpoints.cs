@@ -16,12 +16,22 @@ internal static class AuthEndpoints
     {
         // Self-service tenant signup: creates the organization and its first Admin. Public by
         // design (see docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant) — the caller is not
-        // yet a member of any tenant, so there is nothing to authorize against.
+        // yet a member of any tenant, so there is nothing to authorize against. Rate-limited and
+        // duplicate-checked like the other public auth endpoints: unrestricted, it would let
+        // anyone mass-create tenants, and a duplicate slug/email would otherwise surface as an
+        // unhandled 500 from the unique-index violation instead of a clean 409.
         app.MapPost("/api/tenants", async (ProvisionTenantRequest request, IProvisionTenantService service, CancellationToken ct) =>
         {
-            var result = await service.ProvisionAsync(request, ct);
-            return Results.Created($"/api/admin/tenants/{result.TenantId}", result);
-        });
+            try
+            {
+                var result = await service.ProvisionAsync(request, ct);
+                return Results.Created($"/api/admin/tenants/{result.TenantId}", result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
         app.MapPost("/api/auth/login", async (LoginRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {

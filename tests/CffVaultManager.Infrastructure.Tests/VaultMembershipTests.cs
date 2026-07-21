@@ -221,6 +221,64 @@ public sealed class VaultMembershipTests : IDisposable
                 new CreateMembershipRequest(operatorId, VaultPermission.Read, WrappedDek(), EphemeralKey())));
     }
 
+    [Fact]
+    public async Task InviteAsync_by_a_same_tenant_admin_who_is_not_a_member_throws_KeyNotFoundException()
+    {
+        // Regression test for a security-review finding: an Admin must not be able to grant
+        // themselves (or anyone else) access to an org vault they were never invited to, purely by
+        // virtue of holding the Admin role — "being Admin" is not a backdoor (see docs/multi-
+        // tenancy.md, docs/features/roles-permissions.md: "Accedere a vault di organizzazione ...
+        // Se invitato" applies to Admins too).
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var secondAdminId = await new UserRegistrationService(ctx, _authHashHasher).RegisterInTenantAsync(
+            NewRegisterRequest(UniqueEmail(), UserRole.Admin), adminId, UserRole.Admin, tenantId);
+
+        // secondAdminId is a same-tenant Admin but was never invited to orgVault (created by
+        // adminId). They must not be able to self-invite, even though they hold the Admin role.
+        using var ctx2 = CreateContext(Tenant(tenantId, secondAdminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultMembershipService(ctx2).InviteAsync(orgVault, secondAdminId, tenantId,
+                new CreateMembershipRequest(secondAdminId, VaultPermission.ReadWrite, WrappedDek(), EphemeralKey())));
+    }
+
+    [Fact]
+    public async Task RevokeAsync_by_a_same_tenant_admin_who_is_not_a_member_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var operatorId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        await InviteMemberAsync(orgVault, adminId, tenantId, operatorId, VaultPermission.Read);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var secondAdminId = await new UserRegistrationService(ctx, _authHashHasher).RegisterInTenantAsync(
+            NewRegisterRequest(UniqueEmail(), UserRole.Admin), adminId, UserRole.Admin, tenantId);
+
+        using var ctx2 = CreateContext(Tenant(tenantId, secondAdminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultMembershipService(ctx2).RevokeAsync(orgVault, secondAdminId, tenantId,
+                new RevokeMembershipRequest(operatorId,
+                    Array.Empty<ReencryptedItem>(),
+                    new[] { new NewMembership(adminId, WrappedDek(), EphemeralKey()) })));
+    }
+
+    [Fact]
+    public async Task InviteAsync_by_a_Read_only_member_throws_InsufficientVaultPermissionException()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var readerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var strangerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        await InviteMemberAsync(orgVault, adminId, tenantId, readerId, VaultPermission.Read);
+
+        using var ctx = CreateContext(Tenant(tenantId, readerId));
+        await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
+            new VaultMembershipService(ctx).InviteAsync(orgVault, readerId, tenantId,
+                new CreateMembershipRequest(strangerId, VaultPermission.Read, WrappedDek(), EphemeralKey())));
+    }
+
     // ---- GetPublicKeyAsync ------------------------------------------------------------------
 
     [Fact]

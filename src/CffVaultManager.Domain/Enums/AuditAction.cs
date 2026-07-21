@@ -22,4 +22,5 @@ public enum AuditAction
     TenantSuspended,
     TenantReactivated,
     UserRoleChanged,
+    PermanentlyDeleted,
 }

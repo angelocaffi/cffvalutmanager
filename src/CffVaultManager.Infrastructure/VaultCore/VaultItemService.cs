@@ -165,19 +165,20 @@ internal sealed class VaultItemService : IVaultItemService
 
     public async Task RestoreAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Item not found.");
 
         item.Restore();
+        WriteAudit(vault.TenantId, callerId, AuditAction.Updated, item.Id);
         await _db.SaveChangesAsync(ct);
     }
 
     public async Task PermanentlyDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
@@ -188,13 +189,14 @@ internal sealed class VaultItemService : IVaultItemService
             throw new InvalidOperationException("Item must be moved to trash before permanent deletion.");
         }
 
+        WriteAudit(vault.TenantId, callerId, AuditAction.PermanentlyDeleted, item.Id);
         _db.VaultItems.Remove(item);
         await _db.SaveChangesAsync(ct);
     }
 
     public async Task AssignTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
@@ -210,13 +212,14 @@ internal sealed class VaultItemService : IVaultItemService
         if (!await _db.VaultItemTags.AnyAsync(t => t.VaultItemId == itemId && t.TagId == tagId, ct))
         {
             _db.VaultItemTags.Add(new VaultItemTag(itemId, tagId));
+            WriteAudit(vault.TenantId, callerId, AuditAction.Updated, itemId);
             await _db.SaveChangesAsync(ct);
         }
     }
 
     public async Task RemoveTagAsync(Guid vaultId, Guid itemId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         if (!await _db.VaultItems.AnyAsync(i => i.Id == itemId && i.VaultId == vaultId, ct))
@@ -228,6 +231,7 @@ internal sealed class VaultItemService : IVaultItemService
         if (link is not null)
         {
             _db.VaultItemTags.Remove(link);
+            WriteAudit(vault.TenantId, callerId, AuditAction.Updated, itemId);
             await _db.SaveChangesAsync(ct);
         }
     }

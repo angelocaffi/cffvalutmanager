@@ -41,7 +41,23 @@ internal sealed class RefreshTokenService : IRefreshTokenService
 
         byte[] hash = Sha256(plainToken);
         var existing = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
-        if (existing is null || !existing.IsActive)
+        if (existing is null)
+        {
+            return null;
+        }
+
+        if (existing.RevokedAt is not null)
+        {
+            // Reuse of an already-rotated token: whoever presents it now is not the party that
+            // legitimately rotated it earlier (a stolen token being replayed, most likely). Revoke
+            // the entire descendant chain — including whatever token is currently active at its
+            // end — so the compromise can't be used to keep a session alive; the real owner has to
+            // log in again.
+            await RevokeChainAsync(existing, ct);
+            return null;
+        }
+
+        if (!existing.IsActive)
         {
             return null;
         }
@@ -56,6 +72,44 @@ internal sealed class RefreshTokenService : IRefreshTokenService
         await _db.SaveChangesAsync(ct);
 
         return new IssuedRefreshToken(plain, replacement);
+    }
+
+    private async Task RevokeChainAsync(RefreshToken reusedToken, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        bool revokedAny = false;
+        var current = reusedToken;
+        while (current.ReplacedByTokenId is { } nextId)
+        {
+            var next = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.Id == nextId, ct);
+            if (next is null)
+            {
+                break;
+            }
+
+            if (next.RevokedAt is null)
+            {
+                next.RevokedAt = now;
+                revokedAny = true;
+            }
+
+            current = next;
+        }
+
+        if (revokedAny)
+        {
+            // The caller isn't authenticated (a reused/stolen token, by definition), so the tenant
+            // isn't known from context — looked up the same way AuthenticationService.LoginAsync
+            // bypasses the tenant filter for its own pre-authentication user lookup.
+            Guid? tenantId = await _db.Users.IgnoreQueryFilters()
+                .Where(u => u.Id == reusedToken.UserId)
+                .Select(u => (Guid?)u.TenantId)
+                .FirstOrDefaultAsync(ct);
+
+            _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, reusedToken.UserId, AuditAction.SessionsRevoked));
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<ActiveSessionDto>> ListActiveSessionsAsync(Guid userId, CancellationToken ct = default)

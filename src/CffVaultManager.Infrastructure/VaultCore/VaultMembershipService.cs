@@ -1,5 +1,6 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -12,8 +13,13 @@ namespace CffVaultManager.Infrastructure.VaultCore;
 /// wrapped-key value is produced client-side and stored verbatim: this service performs no
 /// cryptography and never sees a private key or an unwrapped DEK. Cross-tenant references are
 /// rejected as "not found" so tenant membership is never leaked. Admin-only operations (invite,
-/// revoke) rely on endpoint-level authorization for the role gate, matching the platform-admin
-/// surface pattern (see AdminEndpoints).
+/// revoke) rely on endpoint-level authorization for the Admin role gate, but that alone is not
+/// sufficient: per docs/multi-tenancy.md and docs/features/roles-permissions.md, "being Admin"
+/// must never be an implicit backdoor into a vault the Admin was never invited to — only someone
+/// who already holds the vault's DEK (i.e. an active ReadWrite member) can produce a valid wrap
+/// for a new member, so <see cref="InviteAsync"/> and <see cref="RevokeAsync"/> additionally
+/// require the caller to be an active <see cref="VaultPermission.ReadWrite"/> member of the target
+/// vault themselves (checked via <see cref="VaultAccessGuard.GetAccessibleVaultAsync"/>).
 /// </summary>
 internal sealed class VaultMembershipService : IVaultMembershipService
 {
@@ -42,10 +48,15 @@ internal sealed class VaultMembershipService : IVaultMembershipService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var vault = await _db.Vaults.FirstOrDefaultAsync(v => v.Id == vaultId, ct);
-        if (vault is null || vault.TenantId != callerTenantId || !vault.IsOrganizationVault)
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (!vault.IsOrganizationVault)
         {
             throw new KeyNotFoundException("Vault not found.");
+        }
+
+        if (permission != VaultPermission.ReadWrite)
+        {
+            throw new InsufficientVaultPermissionException();
         }
 
         var target = await _db.Users.FirstOrDefaultAsync(u => u.Id == request.UserId, ct);
@@ -80,10 +91,15 @@ internal sealed class VaultMembershipService : IVaultMembershipService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var vault = await _db.Vaults.FirstOrDefaultAsync(v => v.Id == vaultId, ct);
-        if (vault is null || vault.TenantId != callerTenantId || !vault.IsOrganizationVault)
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (!vault.IsOrganizationVault)
         {
             throw new KeyNotFoundException("Vault not found.");
+        }
+
+        if (permission != VaultPermission.ReadWrite)
+        {
+            throw new InsufficientVaultPermissionException();
         }
 
         var activeMemberships = await _db.VaultMemberships

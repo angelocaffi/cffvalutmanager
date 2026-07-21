@@ -32,6 +32,7 @@ internal sealed class TagService : ITagService
 
         var tag = new Tag(Guid.NewGuid(), vault.TenantId, vaultId, request.Name);
         _db.Tags.Add(tag);
+        WriteAudit(vault.TenantId, callerId, AuditAction.Created);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -57,7 +58,7 @@ internal sealed class TagService : ITagService
 
     public async Task<TagDto> RenameAsync(Guid vaultId, Guid tagId, Guid callerId, RenameTagRequest request, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var tag = await _db.Tags.FirstOrDefaultAsync(t => t.Id == tagId && t.VaultId == vaultId, ct)
@@ -69,6 +70,7 @@ internal sealed class TagService : ITagService
         }
 
         tag.Name = request.Name;
+        WriteAudit(vault.TenantId, callerId, AuditAction.Updated);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -83,7 +85,7 @@ internal sealed class TagService : ITagService
 
     public async Task DeleteAsync(Guid vaultId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var tag = await _db.Tags.FirstOrDefaultAsync(t => t.Id == tagId && t.VaultId == vaultId, ct)
@@ -91,6 +93,12 @@ internal sealed class TagService : ITagService
 
         // VaultItemTag rows cascade on tag delete (see VaultItemTagConfiguration).
         _db.Tags.Remove(tag);
+        WriteAudit(vault.TenantId, callerId, AuditAction.Deleted);
         await _db.SaveChangesAsync(ct);
     }
+
+    // Tag actions have no dedicated audit FK (AuditLogEntry.VaultItemId only targets vault
+    // items), so entries here record tenant/caller/action without a linked entity id.
+    private void WriteAudit(Guid tenantId, Guid callerId, AuditAction action) =>
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, action));
 }

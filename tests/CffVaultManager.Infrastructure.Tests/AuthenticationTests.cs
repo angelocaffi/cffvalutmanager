@@ -95,6 +95,22 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task Provisioning_with_a_slug_or_email_already_in_use_throws_InvalidOperationException_not_DbUpdateException()
+    {
+        // Regression test for a security-review finding: TenantSlug/Email are unique DB indexes,
+        // so a duplicate used to surface as an unhandled DbUpdateException (-> 500) instead of a
+        // clean, expected failure.
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new ProvisionTenantService(ctx, _authHashHasher).ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+        }
+
+        using var ctx2 = CreateContext(Unresolved());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new ProvisionTenantService(ctx2, _authHashHasher).ProvisionAsync(NewProvisionRequest(RandomAuthHash())));
+    }
+
+    [Fact]
     public async Task Login_with_correct_credentials_without_mfa_succeeds_with_crypto_materials()
     {
         var authHash = RandomAuthHash();
@@ -510,6 +526,31 @@ public sealed class AuthenticationTests : IDisposable
         // Reusing the already-rotated token must fail.
         var second = await service.ValidateAndRotateAsync(issued.PlainToken, null, null);
         Assert.Null(second);
+    }
+
+    [Fact]
+    public async Task Reusing_an_already_rotated_refresh_token_revokes_the_whole_descendant_chain()
+    {
+        var authHash = RandomAuthHash();
+        var (_, adminId) = await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var original = await service.IssueAsync(adminId, null, null);
+        var rotated = await service.ValidateAndRotateAsync(original.PlainToken, null, null);
+        Assert.NotNull(rotated);
+
+        // Replaying the original (already-rotated) token signals compromise: this must revoke the
+        // descendant it was rotated into as well, not just reject the replay itself.
+        var reuse = await service.ValidateAndRotateAsync(original.PlainToken, null, null);
+        Assert.Null(reuse);
+
+        var descendantStillValid = await service.ValidateAndRotateAsync(rotated!.PlainToken, null, null);
+        Assert.Null(descendantStillValid);
+
+        Assert.True(await ctx.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.SessionsRevoked));
     }
 
     [Fact]

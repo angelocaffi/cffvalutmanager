@@ -3,6 +3,7 @@ using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace CffVaultManager.Infrastructure.Authentication;
 
@@ -25,6 +26,16 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
     public async Task<ProvisionTenantResult> ProvisionAsync(ProvisionTenantRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // Proactive check (both Slug and Email are unique indexes): gives a clean 409 instead of
+        // letting a duplicate surface as an unhandled DbUpdateException from the SQL constraint.
+        // The IgnoreQueryFilters bypass on Users mirrors AuthenticationService's login lookup — the
+        // tenant isn't known yet, so this is a legitimate cross-tenant existence check.
+        if (await _db.Tenants.AnyAsync(t => t.Slug == request.TenantSlug, ct) ||
+            await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == request.AdminEmail, ct))
+        {
+            throw new InvalidOperationException("A tenant with this slug, or a user with this email, already exists.");
+        }
 
         var tenantId = Guid.NewGuid();
         var adminId = Guid.NewGuid();
@@ -59,7 +70,18 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         _db.Users.Add(admin);
         _db.AuditLogEntries.Add(audit);
         _db.Vaults.Add(new Vault(Guid.NewGuid(), tenantId, "Personale", isOrganizationVault: false, ownerUserId: adminId));
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Closes the race between the proactive check above and this insert (the `using`
+            // transaction rolls back automatically since it was never committed).
+            throw new InvalidOperationException("A tenant with this slug, or a user with this email, already exists.");
+        }
+
         await tx.CommitAsync(ct);
 
         return new ProvisionTenantResult(tenantId, adminId);

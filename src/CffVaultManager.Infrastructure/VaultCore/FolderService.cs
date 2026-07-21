@@ -33,6 +33,7 @@ internal sealed class FolderService : IFolderService
 
         var folder = new Folder(Guid.NewGuid(), vault.TenantId, vaultId, request.Name);
         _db.Folders.Add(folder);
+        WriteAudit(vault.TenantId, callerId, AuditAction.Created);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -58,7 +59,7 @@ internal sealed class FolderService : IFolderService
 
     public async Task<FolderDto> RenameAsync(Guid vaultId, Guid folderId, Guid callerId, RenameFolderRequest request, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var folder = await _db.Folders.FirstOrDefaultAsync(f => f.Id == folderId && f.VaultId == vaultId, ct)
@@ -70,6 +71,7 @@ internal sealed class FolderService : IFolderService
         }
 
         folder.Name = request.Name;
+        WriteAudit(vault.TenantId, callerId, AuditAction.Updated);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -84,7 +86,7 @@ internal sealed class FolderService : IFolderService
 
     public async Task DeleteAsync(Guid vaultId, Guid folderId, Guid callerId, CancellationToken ct = default)
     {
-        var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
         if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
 
         var folder = await _db.Folders.FirstOrDefaultAsync(f => f.Id == folderId && f.VaultId == vaultId, ct)
@@ -93,6 +95,12 @@ internal sealed class FolderService : IFolderService
         // The Folder FK on VaultItem is OnDelete(SetNull), so removing the folder simply nulls
         // FolderId on its items at the database level — the items themselves are untouched.
         _db.Folders.Remove(folder);
+        WriteAudit(vault.TenantId, callerId, AuditAction.Deleted);
         await _db.SaveChangesAsync(ct);
     }
+
+    // Folder actions have no dedicated audit FK (AuditLogEntry.VaultItemId only targets vault
+    // items), so entries here record tenant/caller/action without a linked entity id.
+    private void WriteAudit(Guid tenantId, Guid callerId, AuditAction action) =>
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, action));
 }
