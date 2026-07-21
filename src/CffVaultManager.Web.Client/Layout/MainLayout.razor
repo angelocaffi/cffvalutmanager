@@ -12,6 +12,7 @@
         @if (Session.IsUnlocked)
         {
             <div class="d-flex align-items-center gap-3">
+                <a class="nav-link text-white-50" href="/security">Sicurezza</a>
                 <span class="text-white-50 small d-none d-sm-inline">@Session.Email</span>
                 <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
             </div>

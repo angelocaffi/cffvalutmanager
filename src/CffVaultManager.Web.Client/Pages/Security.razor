@@ -1,0 +1,110 @@
+@page "/security"
+@attribute [Authorize]
+@inject AuthApiClient AuthApi
+
+<PageTitle>Sicurezza</PageTitle>
+
+<h1 class="h3 mb-4">Sicurezza</h1>
+
+@if (_profile is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    <div class="card" style="max-width: 32rem;">
+        <div class="card-body">
+            <h2 class="h5">Email OTP come fattore MFA</h2>
+            <p class="text-body-secondary small">
+                Quando abilitato, in aggiunta alla master password ti verrà richiesto un codice inviato
+                alla tua email (@_profile.Email) per completare l'accesso. Rispetto all'app authenticator
+                (TOTP) è considerato un fattore <strong>meno sicuro</strong>, perché dipende dal controllo
+                della casella email.
+            </p>
+
+            @if (!_profile.EmailVerified)
+            {
+                <div class="alert alert-warning py-2" role="alert">
+                    Devi prima verificare il tuo indirizzo email prima di poter abilitare questo fattore.
+                </div>
+            }
+
+            @if (_errorMessage is not null)
+            {
+                <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+            }
+
+            @if (_profile.MfaEmailOtpEnabled)
+            {
+                <p class="mb-3"><span class="badge text-bg-success">Abilitato</span></p>
+                <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="DisableAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Disabilita
+                </button>
+            }
+            else
+            {
+                <p class="mb-3"><span class="badge text-bg-secondary">Disabilitato</span></p>
+                <button type="button" class="btn btn-info" disabled="@(_busy || !_profile.EmailVerified)" @onclick="EnableAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Abilita
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private UserProfileResponse? _profile;
+    private bool _busy;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync() => await ReloadProfileAsync();
+
+    private async Task ReloadProfileAsync() => _profile = await AuthApi.GetProfileAsync();
+
+    private async Task EnableAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var (success, error) = await AuthApi.EnableEmailOtpMfaAsync();
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            await ReloadProfileAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DisableAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            await AuthApi.DisableEmailOtpMfaAsync();
+            await ReloadProfileAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

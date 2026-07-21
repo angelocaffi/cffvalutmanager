@@ -93,6 +93,13 @@ internal static class AuthEndpoints
             return result.Success ? Results.Ok(result) : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
         }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
+        // The caller's own account status — enough for the client to render security settings
+        // (which MFA factors are on, whether the email is verified) without a heavier "full
+        // profile" endpoint.
+        app.MapGet("/api/auth/me", async (IUserProfileService service, ITenantContext tenantContext, CancellationToken ct) =>
+            Results.Ok(await service.GetOwnProfileAsync(tenantContext.UserId!.Value, ct)))
+            .RequireAuthorization();
+
         app.MapPost("/api/auth/mfa/setup", async (IMfaSetupService service, ITenantContext tenantContext, CancellationToken ct) =>
         {
             string uri = await service.SetupTotpAsync(tenantContext.UserId!.Value, ct);

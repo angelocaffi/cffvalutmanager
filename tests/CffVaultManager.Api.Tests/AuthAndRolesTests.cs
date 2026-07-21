@@ -229,6 +229,33 @@ public sealed class AuthAndRolesTests : IAsyncLifetime
         Assert.True(verifyBody.RootElement.GetProperty("success").GetBoolean());
     }
 
+    [Fact]
+    public async Task Me_reflects_the_callers_own_email_and_default_mfa_state()
+    {
+        var authHash = RandomBytes(32);
+        await ProvisionTenantAsync("acme", "admin@acme.test", authHash);
+        var login = await LoginAsync("admin@acme.test", authHash);
+        string accessToken = login.RootElement.GetProperty("accessToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("admin@acme.test", body.RootElement.GetProperty("email").GetString());
+        Assert.False(body.RootElement.GetProperty("emailVerified").GetBoolean());
+        Assert.False(body.RootElement.GetProperty("mfaEnabled").GetBoolean());
+        Assert.False(body.RootElement.GetProperty("mfaEmailOtpEnabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Me_without_a_token_returns_401()
+    {
+        var response = await _client.GetAsync("/api/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private async Task ProvisionTenantAsync(string slug, string adminEmail, byte[] authHash)

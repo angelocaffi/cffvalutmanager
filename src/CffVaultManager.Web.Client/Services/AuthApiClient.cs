@@ -4,11 +4,12 @@ using System.Text.Json;
 namespace CffVaultManager.Web.Client.Services;
 
 /// <summary>
-/// Thin wrapper over the "Api" <see cref="HttpClient"/> for the unauthenticated login flow
-/// (prelogin, login, MFA verification). Response DTOs here are local mirrors of the server's
-/// Application-layer records — Web.Client cannot reference CffVaultManager.Application (only
-/// CffVaultManager.Crypto, per the project's layering), so the JSON shape is duplicated
-/// deliberately rather than shared.
+/// Thin wrapper over the "Api" <see cref="HttpClient"/> for both the unauthenticated login flow
+/// (prelogin, login, MFA verification) and the authenticated security-settings calls that follow
+/// it (enabling/disabling Email OTP as an MFA factor, reading the caller's own profile). Response
+/// DTOs here are local mirrors of the server's Application-layer records — Web.Client cannot
+/// reference CffVaultManager.Application (only CffVaultManager.Crypto, per the project's
+/// layering), so the JSON shape is duplicated deliberately rather than shared.
 /// </summary>
 public sealed class AuthApiClient
 {
@@ -33,12 +34,48 @@ public sealed class AuthApiClient
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
 
-    public async Task<LoginResponse> VerifyMfaAsync(string challengeToken, string code, CancellationToken ct = default)
+    public async Task<LoginResponse> VerifyMfaAsync(string challengeToken, string code, string factor, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync(
-            "/api/auth/mfa/verify", new { ChallengeToken = challengeToken, Code = code }, ct);
+            "/api/auth/mfa/verify", new { ChallengeToken = challengeToken, Code = code, Factor = factor }, ct);
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
+
+    /// <summary>
+    /// Triggers sending an Email OTP code for an in-progress MFA challenge — unlike TOTP, whose
+    /// code already lives on the user's device, this factor requires an explicit send before the
+    /// user has anything to enter. Always "succeeds" from the caller's perspective (uniform
+    /// response, no-op server-side if the challenge token doesn't resolve to a real challenge);
+    /// only an outright invalid/expired token surfaces as an error.
+    /// </summary>
+    public async Task<bool> SendMfaEmailOtpAsync(string challengeToken, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/mfa/email-otp/send", new { ChallengeToken = challengeToken }, ct);
+        return response.IsSuccessStatusCode;
+    }
+
+    /// <summary>The caller's own account status, for rendering the security-settings page.</summary>
+    public async Task<UserProfileResponse> GetProfileAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<UserProfileResponse>("/api/auth/me", JsonOptions, ct))!;
+
+    /// <summary>
+    /// Enables Email OTP as an MFA factor. Fails with a 409-derived message if the account's
+    /// email has never been verified — the server refuses to send codes to an unproven address.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> EnableEmailOtpMfaAsync(CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync("/api/auth/mfa/email-otp/enable", content: null, ct);
+        if (response.IsSuccessStatusCode)
+        {
+            return (true, null);
+        }
+
+        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+        return (false, problem?.Error ?? "Impossibile abilitare l'Email OTP.");
+    }
+
+    public async Task DisableEmailOtpMfaAsync(CancellationToken ct = default) =>
+        await _http.PostAsync("/api/auth/mfa/email-otp/disable", content: null, ct);
 }
 
 public sealed record PreloginResponse(byte[] MasterPasswordSalt, int KdfMemoryKb, int KdfIterations, int KdfVersion);
@@ -53,4 +90,9 @@ public sealed record LoginResponse(
     string? AccessToken,
     string? RefreshToken,
     string? MfaChallengeToken,
+    IReadOnlyList<string>? AvailableMfaFactors,
     CryptoMaterialsResponse? CryptoMaterials);
+
+public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled);
+
+public sealed record ErrorResponse(string? Error);

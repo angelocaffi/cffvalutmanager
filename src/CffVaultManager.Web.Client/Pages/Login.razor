@@ -2,6 +2,7 @@
 @using System.Security.Cryptography
 @using CffVaultManager.Crypto
 @using CffVaultManager.Crypto.Abstractions
+@implements IDisposable
 @inject AuthApiClient AuthApi
 @inject IKeyDerivationService KeyDerivation
 @inject IAuthHashService AuthHashService
@@ -47,10 +48,55 @@
                     </button>
                 </form>
             }
+            else if (_selectedFactor is null)
+            {
+                <p class="text-body-secondary small">Scegli come completare l'accesso.</p>
+
+                @if (_errorMessage is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                }
+
+                <div class="d-grid gap-2">
+                    @if (_availableFactors.Contains("Totp"))
+                    {
+                        <button type="button" class="btn btn-outline-info" @onclick='() => SelectFactorAsync("Totp")'>
+                            App authenticator (TOTP)
+                        </button>
+                    }
+                    @if (_availableFactors.Contains("EmailOtp"))
+                    {
+                        <button type="button" class="btn btn-outline-info" @onclick='() => SelectFactorAsync("EmailOtp")'>
+                            Codice via email <span class="badge text-bg-secondary">meno sicuro</span>
+                        </button>
+                    }
+                </div>
+            }
             else
             {
                 <form @onsubmit="HandleMfaSubmitAsync" @onsubmit:preventDefault="true">
-                    <p class="text-body-secondary small">Inserisci il codice a 6 cifre della tua app di autenticazione.</p>
+                    @if (_selectedFactor == "EmailOtp")
+                    {
+                        <p class="text-body-secondary small">
+                            @if (_codeExpirySeconds is null)
+                            {
+                                <span>Invio del codice in corso…</span>
+                            }
+                            else if (_codeExpirySeconds > 0)
+                            {
+                                <span>Ti abbiamo inviato un codice via email. Inseriscilo qui sotto. Scade tra @FormatCountdown(_codeExpirySeconds.Value).</span>
+                            }
+                            else
+                            {
+                                <span>Il codice è scaduto: inviane uno nuovo.</span>
+                            }
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="text-body-secondary small">Inserisci il codice a 6 cifre della tua app di autenticazione.</p>
+                    }
+
                     <div class="mb-3">
                         <label for="login-mfa-code" class="form-label">Codice</label>
                         <input id="login-mfa-code" type="text" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
@@ -62,13 +108,28 @@
                         <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
                     }
 
-                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                    <button type="submit" class="btn btn-info w-100 mb-2" disabled="@_busy">
                         @if (_busy)
                         {
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                         }
                         @(_busy ? "Verifica in corso…" : "Verifica")
                     </button>
+
+                    @if (_selectedFactor == "EmailOtp")
+                    {
+                        <button type="button" class="btn btn-link btn-sm w-100" disabled="@(_busy || _resendCooldownSeconds > 0)"
+                                @onclick="() => SendEmailOtpAsync()">
+                            @(_resendCooldownSeconds > 0 ? $"Reinvia tra {_resendCooldownSeconds}s" : "Invia di nuovo")
+                        </button>
+                    }
+
+                    @if (_availableFactors.Count > 1)
+                    {
+                        <button type="button" class="btn btn-link btn-sm w-100" disabled="@_busy" @onclick="ResetFactorSelection">
+                            Usa un altro metodo
+                        </button>
+                    }
                 </form>
             }
         </div>
@@ -85,6 +146,19 @@
     private string? _errorMessage;
     private bool _busy;
     private string? _returnUrl;
+
+    private IReadOnlyList<string> _availableFactors = Array.Empty<string>();
+    private string? _selectedFactor;
+    private int _resendCooldownSeconds;
+
+    // Null until the first send actually completes — distinct from 0 (which means "sent, then
+    // expired"), so the UI can show "sending…" instead of wrongly claiming an expired code that
+    // was never sent in the first place.
+    private int? _codeExpirySeconds;
+    private Timer? _countdownTimer;
+
+    private const int ResendCooldownSeconds = 60;
+    private const int CodeExpirySeconds = 600;
 
     // Kept only for the short window between the two login steps (an MFA challenge); never
     // persisted anywhere, and zeroed as soon as it's no longer needed.
@@ -115,7 +189,16 @@
             {
                 _pendingKek = kek.Key.ToArray();
                 _pendingChallengeToken = result.MfaChallengeToken;
+                _availableFactors = result.AvailableMfaFactors ?? Array.Empty<string>();
                 _stage = Stage.Mfa;
+
+                // Only one factor registered: skip the chooser and go straight to it (sending the
+                // Email OTP code immediately, since — unlike TOTP — there is nothing to enter yet).
+                if (_availableFactors.Count == 1)
+                {
+                    await SelectFactorAsync(_availableFactors[0]);
+                }
+
                 return;
             }
 
@@ -134,9 +217,92 @@
         }
     }
 
+    private async Task SelectFactorAsync(string factor)
+    {
+        _errorMessage = null;
+        _mfaCode = string.Empty;
+        _selectedFactor = factor;
+
+        if (factor == "EmailOtp")
+        {
+            await SendEmailOtpAsync();
+        }
+    }
+
+    private void ResetFactorSelection()
+    {
+        StopCountdown();
+        _selectedFactor = null;
+        _mfaCode = string.Empty;
+        _errorMessage = null;
+        _resendCooldownSeconds = 0;
+        _codeExpirySeconds = null;
+    }
+
+    private async Task SendEmailOtpAsync()
+    {
+        if (_pendingChallengeToken is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            bool sent = await AuthApi.SendMfaEmailOtpAsync(_pendingChallengeToken);
+            if (!sent)
+            {
+                _errorMessage = "Impossibile inviare il codice. Riprova ad accedere.";
+                return;
+            }
+
+            _resendCooldownSeconds = ResendCooldownSeconds;
+            _codeExpirySeconds = CodeExpirySeconds;
+            StartCountdown();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void StartCountdown()
+    {
+        _countdownTimer ??= new Timer(_ => InvokeAsync(TickCountdown), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopCountdown()
+    {
+        _countdownTimer?.Dispose();
+        _countdownTimer = null;
+    }
+
+    private void TickCountdown()
+    {
+        if (_resendCooldownSeconds > 0)
+        {
+            _resendCooldownSeconds--;
+        }
+
+        if (_codeExpirySeconds is > 0)
+        {
+            _codeExpirySeconds--;
+        }
+
+        if (_resendCooldownSeconds == 0 && _codeExpirySeconds == 0)
+        {
+            StopCountdown();
+        }
+
+        StateHasChanged();
+    }
+
+    private static string FormatCountdown(int totalSeconds) =>
+        $"{totalSeconds / 60}:{totalSeconds % 60:D2}";
+
     private async Task HandleMfaSubmitAsync()
     {
-        if (_pendingKek is null || _pendingChallengeToken is null)
+        if (_pendingKek is null || _pendingChallengeToken is null || _selectedFactor is null)
         {
             // Lost the in-memory KEK (e.g. the page was reloaded mid-flow) — nothing to unwrap
             // the DEK with, so start over rather than get stuck on a form that can't succeed.
@@ -148,7 +314,7 @@
         _busy = true;
         try
         {
-            var result = await AuthApi.VerifyMfaAsync(_pendingChallengeToken, _mfaCode);
+            var result = await AuthApi.VerifyMfaAsync(_pendingChallengeToken, _mfaCode, _selectedFactor);
 
             if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
             {
@@ -173,6 +339,7 @@
 
     private void CompleteLogin(LoginResponse result, ReadOnlySpan<byte> kek)
     {
+        StopCountdown();
         var wrappedDek = EncryptedBlob.FromBytes(result.CryptoMaterials!.EncryptedDek);
         byte[] dek = DekService.DecryptDek(wrappedDek, kek);
 
@@ -181,4 +348,6 @@
 
         Navigation.NavigateTo(string.IsNullOrEmpty(_returnUrl) ? "/vault" : _returnUrl);
     }
+
+    public void Dispose() => StopCountdown();
 }
