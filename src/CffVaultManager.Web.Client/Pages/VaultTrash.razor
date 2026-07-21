@@ -1,0 +1,143 @@
+@page "/vault/{VaultId:guid}/trash"
+@attribute [Authorize]
+@using System.Text.Json
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@inject VaultApiClient VaultApi
+@inject SessionState Session
+@inject IAeadCipherService AeadCipher
+
+<PageTitle>Cestino</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Cestino</h1>
+    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Torna al vault</a>
+</div>
+
+<p class="text-body-secondary small">
+    Le voci eliminate restano qui finché non vengono ripristinate o eliminate definitivamente.
+    L'eliminazione definitiva non può essere annullata.
+</p>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+}
+
+@if (_items is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_items.Count == 0)
+{
+    <p class="text-body-secondary">Il cestino è vuoto.</p>
+}
+else
+{
+    <div class="list-group" style="max-width: 40rem;">
+        @foreach (var item in _items)
+        {
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span>@(_titles.GetValueOrDefault(item.Id) ?? "(non decifrabile)")</span>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-info btn-sm" disabled="@_busy" @onclick="() => RestoreAsync(item)">
+                        Ripristina
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => PermanentlyDeleteAsync(item)">
+                        Elimina definitivamente
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid VaultId { get; set; }
+
+    private IReadOnlyList<VaultItemResponse>? _items;
+    private readonly Dictionary<Guid, string> _titles = new();
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _errorMessage = null;
+        _items = await VaultApi.ListTrashAsync(VaultId);
+
+        byte[] dek = Session.RequireDek();
+        _titles.Clear();
+        foreach (var item in _items)
+        {
+            _titles[item.Id] = TryGetTitle(item, dek);
+        }
+    }
+
+    private string TryGetTitle(VaultItemResponse item, byte[] dek)
+    {
+        try
+        {
+            var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
+            byte[] plaintext = AeadCipher.Decrypt(blob, dek);
+
+            return item.Type switch
+            {
+                VaultItemTypes.Password => JsonSerializer.Deserialize<PasswordPayload>(plaintext)!.Title,
+                VaultItemTypes.CreditCard => JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!.Title,
+                VaultItemTypes.CryptoWallet => JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!.Label,
+                _ => "(tipo sconosciuto)",
+            };
+        }
+        catch
+        {
+            return "(non decifrabile)";
+        }
+    }
+
+    private async Task RestoreAsync(VaultItemResponse item)
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            if (!await VaultApi.RestoreItemAsync(VaultId, item.Id))
+            {
+                _errorMessage = "Impossibile ripristinare la voce.";
+                return;
+            }
+
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PermanentlyDeleteAsync(VaultItemResponse item)
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            if (!await VaultApi.PermanentlyDeleteItemAsync(VaultId, item.Id))
+            {
+                _errorMessage = "Impossibile eliminare definitivamente la voce.";
+                return;
+            }
+
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,194 @@
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@implements IDisposable
+@inject ICardValidationService CardValidation
+@inject ClipboardJsInterop Clipboard
+
+<div class="card mb-3 text-white" style="max-width: 22rem; background: linear-gradient(135deg, #0d3b66, #1b6ca8);">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+            <span class="text-white-50 small">@BrandLabel(DetectedBrand)</span>
+            @if (IsExpiringSoon)
+            {
+                <span class="badge text-bg-warning">In scadenza</span>
+            }
+        </div>
+        <div class="fs-5 mt-3" style="letter-spacing: 0.1em;">
+            @(_numberRevealTimer.IsRevealed && HasCardNumber ? Model.CardNumber : MaskedNumber)
+        </div>
+        <div class="d-flex justify-content-between mt-3 small">
+            <span>@(string.IsNullOrWhiteSpace(Model.CardholderName) ? "INTESTATARIO" : Model.CardholderName.ToUpperInvariant())</span>
+            <span>@ExpiryLabel</span>
+        </div>
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Titolo</label>
+    <input class="form-control" @bind="Model.Title" @bind:event="oninput" disabled="@Disabled" required />
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Intestatario</label>
+    <input class="form-control" @bind="Model.CardholderName" @bind:event="oninput" disabled="@Disabled" />
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Numero carta</label>
+    <div class="input-group">
+        <input type="@(_numberRevealTimer.IsRevealed ? "text" : "password")"
+               class="@(HasCardNumber && !IsValidCardNumber ? "form-control is-invalid" : "form-control")"
+               value="@Model.CardNumber" @oninput="OnCardNumberInput" disabled="@Disabled" required />
+        <button type="button" class="btn btn-outline-secondary" disabled="@Disabled" @onclick="ToggleNumberRevealAsync">
+            @(_numberRevealTimer.IsRevealed ? "Nascondi" : "Mostra")
+        </button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(Disabled || string.IsNullOrEmpty(Model.CardNumber))" @onclick="CopyNumberAsync">
+            Copia
+        </button>
+    </div>
+    @if (HasCardNumber && !IsValidCardNumber)
+    {
+        <div class="form-text text-danger">Il numero non supera il controllo di Luhn — verifica di averlo digitato correttamente.</div>
+    }
+</div>
+
+<div class="row">
+    <div class="col-6 mb-3">
+        <label class="form-label">Mese scadenza</label>
+        <input type="number" min="1" max="12" class="form-control" @bind="Model.ExpiryMonth" disabled="@Disabled" />
+    </div>
+    <div class="col-6 mb-3">
+        <label class="form-label">Anno scadenza</label>
+        <input type="number" class="form-control" @bind="Model.ExpiryYear" disabled="@Disabled" />
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">CVV</label>
+    <div class="input-group" style="max-width: 12rem;">
+        <input type="@(_cvvRevealTimer.IsRevealed ? "text" : "password")" class="form-control"
+               @bind="Model.Cvv" @bind:event="oninput" disabled="@Disabled" maxlength="4" required />
+        <button type="button" class="btn btn-outline-secondary" disabled="@Disabled" @onclick="ToggleCvvRevealAsync">
+            @(_cvvRevealTimer.IsRevealed ? "Nascondi" : "Mostra")
+        </button>
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Note</label>
+    <textarea class="form-control" rows="3" @bind="Model.Notes" @bind:event="oninput" disabled="@Disabled"></textarea>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public CreditCardFormModel Model { get; set; } = null!;
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Invoked whenever the full number/CVV is actually revealed or copied — the parent records the server-side reveal audit event.</summary>
+    [Parameter]
+    public EventCallback OnRevealSensitiveField { get; set; }
+
+    private readonly RevealTimer _numberRevealTimer;
+    private readonly RevealTimer _cvvRevealTimer;
+
+    public CreditCardFields()
+    {
+        _numberRevealTimer = new RevealTimer(() => InvokeAsync(StateHasChanged));
+        _cvvRevealTimer = new RevealTimer(() => InvokeAsync(StateHasChanged));
+    }
+
+    private bool HasCardNumber => !string.IsNullOrWhiteSpace(Model.CardNumber);
+
+    private bool IsValidCardNumber => CardValidation.IsValidCardNumber(Model.CardNumber);
+
+    private CardBrand DetectedBrand => HasCardNumber ? CardValidation.DetectBrand(Model.CardNumber) : CardBrand.Unknown;
+
+    private string MaskedNumber => HasCardNumber && Model.CardNumber.Replace(" ", "").Replace("-", "").Length >= 4
+        ? CardValidation.MaskCardNumber(Model.CardNumber)
+        : "•••• •••• •••• ••••";
+
+    private bool IsExpiringSoon
+    {
+        get
+        {
+            if (Model.ExpiryMonth is not { } month || Model.ExpiryYear is not { } year || month is < 1 or > 12)
+            {
+                return false;
+            }
+
+            try
+            {
+                var expiry = new DateOnly(year, month, 1).AddMonths(1).AddDays(-1);
+                var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+                return expiry >= today && expiry <= today.AddDays(30);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+        }
+    }
+
+    private string ExpiryLabel => Model.ExpiryMonth is { } m && Model.ExpiryYear is { } y ? $"{m:D2}/{y % 100:D2}" : "MM/AA";
+
+    private static string BrandLabel(CardBrand brand) => brand switch
+    {
+        CardBrand.Visa => "Visa",
+        CardBrand.Mastercard => "Mastercard",
+        CardBrand.AmericanExpress => "American Express",
+        CardBrand.Discover => "Discover",
+        CardBrand.DinersClub => "Diners Club",
+        CardBrand.Jcb => "JCB",
+        CardBrand.UnionPay => "UnionPay",
+        _ => "Carta",
+    };
+
+    // @bind sugar only reacts to the parent re-passing Model as a parameter, not to mutations we
+    // make to it ourselves — an explicit handler is needed here so the (auto-detected, UX-only)
+    // Brand field stays in sync with every keystroke, ready to be saved alongside the rest.
+    private void OnCardNumberInput(ChangeEventArgs e)
+    {
+        Model.CardNumber = e.Value?.ToString() ?? string.Empty;
+        var brand = HasCardNumber ? CardValidation.DetectBrand(Model.CardNumber) : CardBrand.Unknown;
+        Model.Brand = brand == CardBrand.Unknown ? null : BrandLabel(brand);
+    }
+
+    private async Task ToggleNumberRevealAsync()
+    {
+        if (_numberRevealTimer.IsRevealed)
+        {
+            _numberRevealTimer.Hide();
+            return;
+        }
+
+        await OnRevealSensitiveField.InvokeAsync();
+        _numberRevealTimer.Reveal(TimeSpan.FromSeconds(15));
+    }
+
+    private async Task ToggleCvvRevealAsync()
+    {
+        if (_cvvRevealTimer.IsRevealed)
+        {
+            _cvvRevealTimer.Hide();
+            return;
+        }
+
+        await OnRevealSensitiveField.InvokeAsync();
+        _cvvRevealTimer.Reveal(TimeSpan.FromSeconds(15));
+    }
+
+    private async Task CopyNumberAsync()
+    {
+        await OnRevealSensitiveField.InvokeAsync();
+        await Clipboard.CopyWithAutoClearAsync(Model.CardNumber);
+    }
+
+    public void Dispose()
+    {
+        _numberRevealTimer.Dispose();
+        _cvvRevealTimer.Dispose();
+    }
+}

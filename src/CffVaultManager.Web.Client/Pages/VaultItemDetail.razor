@@ -1,0 +1,261 @@
+@page "/vault/{VaultId:guid}/items/new/{Type}"
+@page "/vault/{VaultId:guid}/items/{ItemId:guid}"
+@attribute [Authorize]
+@using System.Security.Cryptography
+@using System.Text.Json
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@using CffVaultManager.Web.Client.Shared
+@inject VaultApiClient VaultApi
+@inject SessionState Session
+@inject IAeadCipherService AeadCipher
+@inject NavigationManager Navigation
+
+<PageTitle>@(_isNew ? "Nuova voce" : "Modifica voce")</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">@(_isNew ? "Nuova voce" : "Modifica voce")</h1>
+    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Annulla</a>
+</div>
+
+@if (_loading)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    <form @onsubmit="SaveAsync" @onsubmit:preventDefault="true" style="max-width: 32rem;">
+        @if (_errorMessage is not null)
+        {
+            <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+        }
+
+        @if (_effectiveType == VaultItemTypes.Password)
+        {
+            <PasswordFields Model="_passwordModel" Disabled="_busy" OnRevealPassword="RecordRevealAsync" />
+        }
+        else if (_effectiveType == VaultItemTypes.CreditCard)
+        {
+            <CreditCardFields Model="_creditCardModel" Disabled="_busy" OnRevealSensitiveField="RecordRevealAsync" />
+        }
+        else if (_effectiveType == VaultItemTypes.CryptoWallet)
+        {
+            <CryptoWalletFields Model="_cryptoWalletModel" Disabled="_busy" OnRevealSensitiveField="RecordRevealAsync" />
+        }
+        else
+        {
+            <div class="alert alert-warning" role="alert">Tipo di voce non supportato: @_effectiveType.</div>
+        }
+
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" @bind="_isFavorite" id="item-favorite" disabled="@_busy" />
+            <label class="form-check-label" for="item-favorite">Preferito</label>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-info" disabled="@_busy">
+                @if (_busy)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                }
+                @(_busy ? "Salvataggio…" : "Salva")
+            </button>
+            @if (!_isNew)
+            {
+                <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="DeleteAsync">Elimina</button>
+            }
+        </div>
+    </form>
+}
+
+@code {
+    [Parameter]
+    public Guid VaultId { get; set; }
+
+    [Parameter]
+    public string? Type { get; set; }
+
+    [Parameter]
+    public Guid? ItemId { get; set; }
+
+    private bool _isNew;
+    private string _effectiveType = string.Empty;
+    private Guid? _folderId;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _isFavorite;
+    private string? _errorMessage;
+
+    private PasswordFormModel _passwordModel = new();
+    private CreditCardFormModel _creditCardModel = new();
+    private CryptoWalletFormModel _cryptoWalletModel = new();
+
+    // The password as it was before this edit session, to detect a real change and push the old
+    // value into PasswordHistory (docs/features/password-manager.md) — never set for a new item.
+    private string? _originalPassword;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _errorMessage = null;
+        _loading = true;
+        try
+        {
+            if (ItemId is { } id)
+            {
+                _isNew = false;
+                var item = await VaultApi.GetItemAsync(VaultId, id);
+                _effectiveType = item.Type;
+                _isFavorite = item.IsFavorite;
+                _folderId = item.FolderId;
+                DecryptInto(item);
+            }
+            else
+            {
+                _isNew = true;
+                _effectiveType = Type ?? VaultItemTypes.Password;
+                _isFavorite = false;
+                _folderId = null;
+                _passwordModel = new PasswordFormModel();
+                _creditCardModel = new CreditCardFormModel();
+                _cryptoWalletModel = new CryptoWalletFormModel();
+                _originalPassword = null;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void DecryptInto(VaultItemResponse item)
+    {
+        byte[] dek = Session.RequireDek();
+        try
+        {
+            var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
+            byte[] plaintext = AeadCipher.Decrypt(blob, dek);
+
+            if (item.Type == VaultItemTypes.Password)
+            {
+                var payload = JsonSerializer.Deserialize<PasswordPayload>(plaintext)!;
+                _passwordModel = PasswordFormModel.FromPayload(payload);
+                _originalPassword = payload.Password;
+            }
+            else if (item.Type == VaultItemTypes.CreditCard)
+            {
+                _creditCardModel = CreditCardFormModel.FromPayload(JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!);
+            }
+            else if (item.Type == VaultItemTypes.CryptoWallet)
+            {
+                _cryptoWalletModel = CryptoWalletFormModel.FromPayload(JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!);
+            }
+        }
+        catch (CryptographicException)
+        {
+            _errorMessage = "Impossibile decifrare questa voce (chiave errata o dato corrotto).";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            byte[] dek = Session.RequireDek();
+            byte[] plaintext;
+            if (_effectiveType == VaultItemTypes.Password)
+            {
+                plaintext = SerializePassword();
+            }
+            else if (_effectiveType == VaultItemTypes.CreditCard)
+            {
+                plaintext = JsonSerializer.SerializeToUtf8Bytes(_creditCardModel.ToPayload());
+            }
+            else if (_effectiveType == VaultItemTypes.CryptoWallet)
+            {
+                plaintext = JsonSerializer.SerializeToUtf8Bytes(_cryptoWalletModel.ToPayload());
+            }
+            else
+            {
+                _errorMessage = $"Tipo di voce non supportato: {_effectiveType}.";
+                return;
+            }
+
+            byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, dek).ToBytes();
+
+            if (_isNew)
+            {
+                var (success, _, error) = await VaultApi.CreateItemAsync(VaultId, _effectiveType, encryptedPayload, _folderId, _isFavorite);
+                if (!success)
+                {
+                    _errorMessage = error;
+                    return;
+                }
+            }
+            else
+            {
+                var (success, _, error) = await VaultApi.UpdateItemAsync(VaultId, ItemId!.Value, _effectiveType, encryptedPayload, _folderId, _isFavorite);
+                if (!success)
+                {
+                    _errorMessage = error;
+                    return;
+                }
+            }
+
+            Navigation.NavigateTo($"/vault/{VaultId}");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private byte[] SerializePassword()
+    {
+        if (!_isNew && _originalPassword is not null && _originalPassword != _passwordModel.Password)
+        {
+            _passwordModel.PasswordHistory.Insert(0, _originalPassword);
+        }
+
+        return JsonSerializer.SerializeToUtf8Bytes(_passwordModel.ToPayload());
+    }
+
+    private async Task RecordRevealAsync()
+    {
+        if (!_isNew && ItemId is { } id)
+        {
+            await VaultApi.RecordRevealAsync(VaultId, id);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (ItemId is not { } id)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            if (await VaultApi.DeleteItemAsync(VaultId, id))
+            {
+                Navigation.NavigateTo($"/vault/{VaultId}");
+            }
+            else
+            {
+                _errorMessage = "Impossibile eliminare la voce.";
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,234 @@
+@page "/vault/{VaultId:guid}"
+@attribute [Authorize]
+@using System.Text.Json
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@inject VaultApiClient VaultApi
+@inject SessionState Session
+@inject IAeadCipherService AeadCipher
+@inject NavigationManager Navigation
+
+<PageTitle>Vault</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h1 class="h3 mb-0">Le tue voci</h1>
+    <div class="dropdown">
+        <button class="btn btn-info dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            Nuova voce
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
+            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
+            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <input type="search" class="form-control" style="max-width: 16rem;" placeholder="Cerca…"
+           @bind="_searchText" @bind:event="oninput" />
+    <select class="form-select" style="max-width: 14rem;" @bind="_typeFilter">
+        <option value="">Tutti i tipi</option>
+        <option value="@VaultItemTypes.Password">Password</option>
+        <option value="@VaultItemTypes.CreditCard">Carte di credito</option>
+        <option value="@VaultItemTypes.CryptoWallet">Crypto wallet</option>
+    </select>
+    <a class="btn btn-outline-secondary ms-auto" href="@($"/vault/{VaultId}/trash")">Cestino</a>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+}
+
+@if (_items is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    var visible = _items.Where(MatchesFilter).ToList();
+
+    if (visible.Count == 0)
+    {
+        <p class="text-body-secondary">Nessuna voce trovata.</p>
+    }
+    else
+    {
+        <div class="list-group" style="max-width: 40rem;">
+            @foreach (var item in visible)
+            {
+                var summary = _summaries.GetValueOrDefault(item.Id) ?? new DecryptedSummary("(non decifrabile)", null);
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-link p-0 me-2" title="Preferito" disabled="@_busy" @onclick="() => ToggleFavoriteAsync(item)">
+                        @(item.IsFavorite ? "★" : "☆")
+                    </button>
+                    <a class="flex-grow-1 text-body text-decoration-none" href="@ItemUrl(item.Id)">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge text-bg-secondary">@TypeLabel(item.Type)</span>
+                            <span>@summary.Title</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(summary.Subtitle))
+                        {
+                            <div class="text-body-secondary small">@summary.Subtitle</div>
+                        }
+                    </a>
+                    <button type="button" class="btn btn-outline-danger btn-sm ms-2" disabled="@_busy" @onclick="() => DeleteAsync(item)">
+                        Elimina
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid VaultId { get; set; }
+
+    private IReadOnlyList<VaultItemResponse>? _items;
+    private readonly Dictionary<Guid, DecryptedSummary> _summaries = new();
+    private string _searchText = string.Empty;
+    private string _typeFilter = string.Empty;
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _errorMessage = null;
+        _items = await VaultApi.ListItemsAsync(VaultId);
+
+        byte[] dek = Session.RequireDek();
+        _summaries.Clear();
+        foreach (var item in _items)
+        {
+            _summaries[item.Id] = Summarize(item, dek);
+        }
+    }
+
+    private DecryptedSummary Summarize(VaultItemResponse item, byte[] dek)
+    {
+        try
+        {
+            var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
+            byte[] plaintext = AeadCipher.Decrypt(blob, dek);
+
+            return item.Type switch
+            {
+                VaultItemTypes.Password => FromPassword(JsonSerializer.Deserialize<PasswordPayload>(plaintext)!),
+                VaultItemTypes.CreditCard => FromCreditCard(JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!),
+                VaultItemTypes.CryptoWallet => FromCryptoWallet(JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!),
+                _ => new DecryptedSummary("(tipo sconosciuto)", null),
+            };
+        }
+        catch
+        {
+            // Wrong/rotated DEK, corrupted ciphertext, or a payload shape this client version
+            // doesn't recognize — never crash the whole list over one bad item.
+            return new DecryptedSummary("(non decifrabile)", null);
+        }
+    }
+
+    private static DecryptedSummary FromPassword(PasswordPayload payload) => new(payload.Title, payload.Username);
+
+    private static DecryptedSummary FromCreditCard(CreditCardPayload payload)
+    {
+        string last4 = payload.CardNumber.Length >= 4 ? payload.CardNumber[^4..] : payload.CardNumber;
+        string subtitle = string.IsNullOrEmpty(payload.Brand) ? $"•••• {last4}" : $"{payload.Brand} •••• {last4}";
+        return new DecryptedSummary(payload.Title, subtitle);
+    }
+
+    private static DecryptedSummary FromCryptoWallet(CryptoWalletPayload payload)
+    {
+        string? subtitle = payload.Network;
+        if (payload.Addresses.Count > 0)
+        {
+            string address = payload.Addresses[0];
+            string masked = address.Length > 8 ? $"{address[..4]}…{address[^4..]}" : address;
+            subtitle = subtitle is null ? masked : $"{subtitle} · {masked}";
+        }
+
+        return new DecryptedSummary(payload.Label, subtitle);
+    }
+
+    private bool MatchesFilter(VaultItemResponse item)
+    {
+        if (!string.IsNullOrEmpty(_typeFilter) && item.Type != _typeFilter)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            return true;
+        }
+
+        var summary = _summaries.GetValueOrDefault(item.Id);
+        return (summary?.Title.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (summary?.Subtitle?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private async Task ToggleFavoriteAsync(VaultItemResponse item)
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var (success, _, error) = await VaultApi.UpdateItemAsync(
+                VaultId, item.Id, item.Type, item.EncryptedPayload, item.FolderId, !item.IsFavorite);
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync(VaultItemResponse item)
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            if (!await VaultApi.DeleteItemAsync(VaultId, item.Id))
+            {
+                _errorMessage = "Impossibile eliminare la voce.";
+                return;
+            }
+
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string TypeLabel(string type) => type switch
+    {
+        VaultItemTypes.Password => "Password",
+        VaultItemTypes.CreditCard => "Carta",
+        VaultItemTypes.CryptoWallet => "Wallet",
+        VaultItemTypes.SecureNote => "Nota",
+        VaultItemTypes.GenericSecret => "Secret",
+        _ => type,
+    };
+
+    private string NewItemUrl(string type) => $"/vault/{VaultId}/items/new/{type}";
+
+    private string ItemUrl(Guid itemId) => $"/vault/{VaultId}/items/{itemId}";
+
+    private sealed record DecryptedSummary(string Title, string? Subtitle);
+}

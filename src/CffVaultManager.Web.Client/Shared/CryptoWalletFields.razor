@@ -1,0 +1,185 @@
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@implements IDisposable
+@inject ICryptoWalletValidationService WalletValidation
+@inject ClipboardJsInterop Clipboard
+
+<div class="mb-3">
+    <label class="form-label">Etichetta</label>
+    <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@Disabled" required />
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Rete</label>
+    <div>
+        <span class="badge text-bg-secondary">@NetworkLabel</span>
+        <span class="text-body-secondary small ms-1">(riconosciuta automaticamente dal primo indirizzo)</span>
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Indirizzi</label>
+    @for (int i = 0; i < Model.Addresses.Count; i++)
+    {
+        int index = i;
+        <div class="input-group mb-2">
+            <input class="form-control" value="@Model.Addresses[index]" @oninput="e => OnAddressInput(index, e)" disabled="@Disabled" />
+            <button type="button" class="btn btn-outline-secondary" disabled="@(Disabled || string.IsNullOrWhiteSpace(Model.Addresses[index]))"
+                    @onclick="() => CopyAddressAsync(index)">
+                Copia
+            </button>
+            @if (Model.Addresses.Count > 1)
+            {
+                <button type="button" class="btn btn-outline-danger" disabled="@Disabled" @onclick="() => RemoveAddress(index)">
+                    Rimuovi
+                </button>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(Model.Addresses[index]) && !WalletValidation.IsPlausibleAddress(Model.Addresses[index]))
+        {
+            <div class="form-text text-danger">Indirizzo dal formato non plausibile — verifica di averlo digitato correttamente.</div>
+        }
+    }
+    <button type="button" class="btn btn-outline-info btn-sm" disabled="@Disabled" @onclick="AddAddress">Aggiungi indirizzo</button>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Chiave privata</label>
+    <div class="input-group">
+        <input type="@(_privateKeyRevealTimer.IsRevealed ? "text" : "password")" class="form-control"
+               @bind="Model.PrivateKey" @bind:event="oninput" disabled="@Disabled" />
+        <button type="button" class="btn btn-outline-secondary" disabled="@Disabled" @onclick="TogglePrivateKeyRevealAsync">
+            @(_privateKeyRevealTimer.IsRevealed ? "Nascondi" : "Mostra")
+        </button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(Disabled || string.IsNullOrEmpty(Model.PrivateKey))" @onclick="CopyPrivateKeyAsync">
+            Copia
+        </button>
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Seed phrase / mnemonic</label>
+    <div class="input-group">
+        <textarea class="form-control" rows="2" style="@(_mnemonicRevealTimer.IsRevealed ? "" : "-webkit-text-security: disc; text-security: disc;")"
+                  @bind="Model.Mnemonic" @bind:event="oninput" disabled="@Disabled"></textarea>
+        <button type="button" class="btn btn-outline-secondary" disabled="@Disabled" @onclick="ToggleMnemonicRevealAsync">
+            @(_mnemonicRevealTimer.IsRevealed ? "Nascondi" : "Mostra")
+        </button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(Disabled || string.IsNullOrEmpty(Model.Mnemonic))" @onclick="CopyMnemonicAsync">
+            Copia
+        </button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Model.Mnemonic) && !WalletValidation.IsPlausibleMnemonicWordCount(Model.Mnemonic))
+    {
+        <div class="form-text text-danger">Il numero di parole non corrisponde a una lunghezza BIP-39 valida (12/15/18/21/24).</div>
+    }
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Note</label>
+    <textarea class="form-control" rows="3" @bind="Model.Notes" @bind:event="oninput" disabled="@Disabled"></textarea>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public CryptoWalletFormModel Model { get; set; } = null!;
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Invoked whenever the private key/mnemonic is actually revealed or copied — the parent records the server-side reveal audit event.</summary>
+    [Parameter]
+    public EventCallback OnRevealSensitiveField { get; set; }
+
+    private readonly RevealTimer _privateKeyRevealTimer;
+    private readonly RevealTimer _mnemonicRevealTimer;
+
+    public CryptoWalletFields()
+    {
+        _privateKeyRevealTimer = new RevealTimer(() => InvokeAsync(StateHasChanged));
+        _mnemonicRevealTimer = new RevealTimer(() => InvokeAsync(StateHasChanged));
+    }
+
+    private WalletNetwork DetectedNetwork
+    {
+        get
+        {
+            string? firstAddress = Model.Addresses.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a));
+            return firstAddress is null ? WalletNetwork.Unknown : WalletValidation.DetectNetwork(firstAddress);
+        }
+    }
+
+    private string NetworkLabel => DetectedNetwork switch
+    {
+        WalletNetwork.Bitcoin => "Bitcoin",
+        WalletNetwork.Ethereum => "Ethereum",
+        WalletNetwork.Litecoin => "Litecoin",
+        _ => "Sconosciuta",
+    };
+
+    private void SyncNetworkFromAddresses() =>
+        Model.Network = DetectedNetwork == WalletNetwork.Unknown ? null : DetectedNetwork.ToString();
+
+    private void OnAddressInput(int index, ChangeEventArgs e)
+    {
+        Model.Addresses[index] = e.Value?.ToString() ?? string.Empty;
+        SyncNetworkFromAddresses();
+    }
+
+    private void AddAddress() => Model.Addresses.Add(string.Empty);
+
+    private void RemoveAddress(int index)
+    {
+        Model.Addresses.RemoveAt(index);
+        SyncNetworkFromAddresses();
+    }
+
+    private async Task CopyAddressAsync(int index)
+    {
+        await OnRevealSensitiveField.InvokeAsync();
+        await Clipboard.CopyWithAutoClearAsync(Model.Addresses[index]);
+    }
+
+    private async Task TogglePrivateKeyRevealAsync()
+    {
+        if (_privateKeyRevealTimer.IsRevealed)
+        {
+            _privateKeyRevealTimer.Hide();
+            return;
+        }
+
+        await OnRevealSensitiveField.InvokeAsync();
+        _privateKeyRevealTimer.Reveal(TimeSpan.FromSeconds(15));
+    }
+
+    private async Task ToggleMnemonicRevealAsync()
+    {
+        if (_mnemonicRevealTimer.IsRevealed)
+        {
+            _mnemonicRevealTimer.Hide();
+            return;
+        }
+
+        await OnRevealSensitiveField.InvokeAsync();
+        _mnemonicRevealTimer.Reveal(TimeSpan.FromSeconds(15));
+    }
+
+    private async Task CopyPrivateKeyAsync()
+    {
+        await OnRevealSensitiveField.InvokeAsync();
+        await Clipboard.CopyWithAutoClearAsync(Model.PrivateKey);
+    }
+
+    private async Task CopyMnemonicAsync()
+    {
+        await OnRevealSensitiveField.InvokeAsync();
+        await Clipboard.CopyWithAutoClearAsync(Model.Mnemonic);
+    }
+
+    public void Dispose()
+    {
+        _privateKeyRevealTimer.Dispose();
+        _mnemonicRevealTimer.Dispose();
+    }
+}

@@ -14,6 +14,13 @@ builder.Services.AddSingleton<IAeadCipherService, AesGcmCipherService>();
 builder.Services.AddSingleton<IDekService, DekService>();
 builder.Services.AddSingleton<IAuthHashService, AuthHashService>();
 
+// Vault-item form helpers: password generation/strength, card and crypto-wallet format checks.
+// All stateless and RNG-only where relevant (see docs/features/password-manager.md).
+builder.Services.AddSingleton<IPasswordGeneratorService, PasswordGeneratorService>();
+builder.Services.AddSingleton<IPasswordStrengthService, PasswordStrengthService>();
+builder.Services.AddSingleton<ICardValidationService, CardValidationService>();
+builder.Services.AddSingleton<ICryptoWalletValidationService, CryptoWalletValidationService>();
+
 builder.Services.AddSingleton<SessionState>();
 builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthenticationStateProvider, VaultAuthenticationStateProvider>();
@@ -29,5 +36,6 @@ builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().Cre
 builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
+builder.Services.AddScoped<ClipboardJsInterop>();
 
 await builder.Build().RunAsync();
