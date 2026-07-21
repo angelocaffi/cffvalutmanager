@@ -1,0 +1,6 @@
+@CffVaultManager.Api_HostAddress = http://localhost:5032
+
+GET {{CffVaultManager.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

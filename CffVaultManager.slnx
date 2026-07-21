@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CffVaultManager.Api/CffVaultManager.Api.csproj" />
+    <Project Path="src/CffVaultManager.Application/CffVaultManager.Application.csproj" />
+    <Project Path="src/CffVaultManager.Crypto/CffVaultManager.Crypto.csproj" />
+    <Project Path="src/CffVaultManager.Domain/CffVaultManager.Domain.csproj" />
+    <Project Path="src/CffVaultManager.Infrastructure/CffVaultManager.Infrastructure.csproj" />
+    <Project Path="src/CffVaultManager.Web.Client/CffVaultManager.Web.Client.csproj" />
+    <Project Path="src/CffVaultManager.Web/CffVaultManager.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CffVaultManager.Api.Tests/CffVaultManager.Api.Tests.csproj" />
+    <Project Path="tests/CffVaultManager.Application.Tests/CffVaultManager.Application.Tests.csproj" />
+    <Project Path="tests/CffVaultManager.Crypto.Tests/CffVaultManager.Crypto.Tests.csproj" />
+    <Project Path="tests/CffVaultManager.Infrastructure.Tests/CffVaultManager.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>c4f21b7a-3e5a-4a2c-8e6b-2f3a9d7b5c10</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CffVaultManager.Application\CffVaultManager.Application.csproj" />
+    <ProjectReference Include="..\CffVaultManager.Infrastructure\CffVaultManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\CffVaultManager.Domain\CffVaultManager.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
