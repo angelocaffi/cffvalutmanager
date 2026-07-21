@@ -57,6 +57,10 @@ Singoli secrets (password, carte, note) — persistiti come ciphertext + nonce +
 - Se in futuro si integrano pagamenti reali, valutare la conformità **PCI-DSS**; per un vault "personal", i dati carta sono trattati come qualunque altro secret cifrato, mai trasmessi a processori di pagamento.
 - Il PAN (numero carta) va sempre mascherato in UI di default (mostra ultime 4 cifre), con "reveal" esplicito che richiede ri-autenticazione o conferma.
 
+## Eccezione controllata: controllo password compromesse (k-anonymity)
+
+Il password health check (vedi [features/password-health.md](features/password-health.md)) introduce l'unica chiamata di rete di questo progetto indirettamente legata a un secret: `IBreachCheckService`/`HibpBreachCheckService` (in `CffVaultManager.Crypto`, eseguito solo client-side) invia ai server di *Have I Been Pwned* i primi 5 caratteri esadecimali dell'hash SHA-1 della password — mai la password né l'hash completo, seguendo il protocollo k-anonymity dell'API stessa. SHA-1 qui non è una scelta di sicurezza di questo progetto (che usa Argon2id/AES-256-GCM ovunque il rischio sia reale): è l'hash su cui è indicizzato il corpus HIBP, mandato dal loro protocollo. Il prefisso a 5 caratteri non è invertibile alla password originale (spazio di ricerca ancora enorme). Nessun altro servizio esterno riceve mai dati derivati da un secret in questo progetto.
+
 ## Checklist di revisione sicurezza (da applicare a ogni feature che tocca secrets)
 
 - [ ] Il dato sensibile è cifrato prima di toccare il livello di persistenza?

@@ -1,6 +1,6 @@
 # Password health / security dashboard
 
-> Stato: backlog (v2) — non richiesta per l'MVP.
+> Stato: backlog (v2), non richiesta per l'MVP — ma la libreria di analisi client-side è già implementata (vedi "Stato" in fondo); manca la UI Blazor.
 
 ## Scopo
 
@@ -21,4 +21,10 @@ Aiutare l'utente a identificare e correggere password deboli, riutilizzate o com
 
 ## Stato
 
-Backlog — da riprendere dopo il completamento delle feature core.
+Libreria di analisi implementata in `CffVaultManager.Crypto` (nessun tocco lato Api/Infrastructure/Domain, coerente con "resta interamente client-side" sopra):
+
+- `IPasswordStrengthService`/`PasswordStrengthService` — stima l'entropia con la formula classica lunghezza × log2(dimensione del pool di caratteri usato), la stessa baseline semplice usata da molti indicatori di forza. Deliberatamente **non** un estimatore consapevole di pattern (tipo zxcvbn): non riconosce una password ripetuta o una parola di dizionario, che può ottenere un punteggio artificialmente alto sulla sola dimensione del pool.
+- `IPasswordReuseService`/`PasswordReuseService` — raggruppa gli ID delle voci che condividono la stessa password decifrata (confronto per uguaglianza esatta, case-sensitive).
+- `IBreachCheckService`/`HibpBreachCheckService` — controllo "password compromessa" via l'API k-anonymity di Have I Been Pwned; vedi [../security-model.md](../security-model.md#eccezione-controllata-controllo-password-compromesse-k-anonymity) per l'eccezione esplicita alla policy di rete. Verificato dal vivo contro l'API reale (non solo mockato nei test): la password "password" risulta in ~52 milioni di occorrenze, una stringa casuale in 0.
+
+21 nuovi test (`CffVaultManager.Crypto.Tests`). Manca ancora: le pagine Blazor (`Web.Client`) — dashboard con punteggio complessivo, generatore integrato per il suggerimento di aggiornamento (il generatore stesso esiste già, vedi [password-manager.md](password-manager.md)).
