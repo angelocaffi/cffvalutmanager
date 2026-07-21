@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\CffVaultManager.Application\CffVaultManager.Application.csproj" />
     <ProjectReference Include="..\..\src\CffVaultManager.Infrastructure\CffVaultManager.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\CffVaultManager.Domain\CffVaultManager.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CffVaultManager.Crypto\CffVaultManager.Crypto.csproj" />
   </ItemGroup>
 
 </Project>
