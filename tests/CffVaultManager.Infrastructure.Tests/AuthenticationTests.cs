@@ -112,6 +112,38 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task PreloginAsync_for_a_known_user_returns_their_real_salt_and_kdf_params()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var result = await CreateAuthService(ctx).PreloginAsync("admin@x.com");
+
+        Assert.Equal(Salt, result.MasterPasswordSalt);
+        Assert.Equal(65536, result.KdfMemoryKb);
+        Assert.Equal(3, result.KdfIterations);
+        Assert.Equal(1, result.KdfVersion);
+    }
+
+    [Fact]
+    public async Task PreloginAsync_for_an_unknown_email_returns_a_stable_fake_salt_not_an_error()
+    {
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var first = await auth.PreloginAsync("nobody@nowhere.test");
+        var second = await auth.PreloginAsync("nobody@nowhere.test");
+        var differentEmail = await auth.PreloginAsync("someone-else@nowhere.test");
+
+        // Same email -> same fake salt every time (a real user's salt never changes between
+        // requests, so a fresh-random fake would itself be a distinguishing tell).
+        Assert.Equal(first.MasterPasswordSalt, second.MasterPasswordSalt);
+        // Different (still unknown) emails must not collide on the same fake salt.
+        Assert.NotEqual(first.MasterPasswordSalt, differentEmail.MasterPasswordSalt);
+    }
+
+    [Fact]
     public async Task Login_with_correct_credentials_without_mfa_succeeds_with_crypto_materials()
     {
         var authHash = RandomAuthHash();

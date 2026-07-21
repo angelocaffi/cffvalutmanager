@@ -33,6 +33,14 @@ internal static class AuthEndpoints
             }
         }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
+        // "Prelogin": lets a client that has never cached its own salt/KDF params (a fresh device,
+        // or the very first login after registration) fetch what it needs to derive its KEK and
+        // compute an auth hash — see IAuthenticationService.PreloginAsync for the anti-enumeration
+        // handling of an unknown email. Always 200; there is no failure case to distinguish here.
+        app.MapPost("/api/auth/prelogin", async (PreloginRequest request, IAuthenticationService auth, CancellationToken ct) =>
+            Results.Ok(await auth.PreloginAsync(request.Email, ct)))
+            .RequireRateLimiting(AuthRateLimiting.PolicyName);
+
         app.MapPost("/api/auth/login", async (LoginRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
             var result = await auth.LoginAsync(request.Email, request.AuthHash, ClientIp(http), UserAgent(http), ct);
@@ -132,6 +140,8 @@ internal static class AuthEndpoints
     private static string? UserAgent(HttpContext http) =>
         http.Request.Headers.UserAgent.Count > 0 ? http.Request.Headers.UserAgent.ToString() : null;
 }
+
+internal sealed record PreloginRequest(string Email);
 
 internal sealed record LoginRequest(string Email, byte[] AuthHash);
 

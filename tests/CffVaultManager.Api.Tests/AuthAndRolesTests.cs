@@ -38,6 +38,42 @@ public sealed class AuthAndRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Prelogin_for_a_provisioned_email_returns_its_real_salt_and_kdf_params()
+    {
+        var authHash = RandomBytes(32);
+        byte[] salt = RandomBytes(16);
+        var response = await _client.PostAsJsonAsync("/api/tenants", new
+        {
+            TenantName = "acme",
+            TenantSlug = "acme",
+            AdminEmail = "admin@acme.test",
+            AuthHash = authHash,
+            EncryptedDek = RandomBytes(4),
+            MasterPasswordSalt = salt,
+            KdfMemoryKb = 65536,
+            KdfIterations = 3,
+            KdfVersion = 1,
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var prelogin = await _client.PostAsJsonAsync("/api/auth/prelogin", new { Email = "admin@acme.test" });
+        Assert.Equal(HttpStatusCode.OK, prelogin.StatusCode);
+        using var body = JsonDocument.Parse(await prelogin.Content.ReadAsStringAsync());
+        Assert.Equal(salt, body.RootElement.GetProperty("masterPasswordSalt").GetBytesFromBase64());
+        Assert.Equal(65536, body.RootElement.GetProperty("kdfMemoryKb").GetInt32());
+    }
+
+    [Fact]
+    public async Task Prelogin_for_an_unknown_email_still_returns_200_with_a_plausible_salt()
+    {
+        // Anti-enumeration: no 404, no distinguishing error — same shape as a real user.
+        var response = await _client.PostAsJsonAsync("/api/auth/prelogin", new { Email = "nobody@nowhere.test" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(16, body.RootElement.GetProperty("masterPasswordSalt").GetBytesFromBase64().Length);
+    }
+
+    [Fact]
     public async Task Provision_then_login_succeeds_and_returns_a_usable_access_token()
     {
         var authHash = RandomBytes(32);

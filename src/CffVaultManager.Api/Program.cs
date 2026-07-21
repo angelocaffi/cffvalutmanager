@@ -41,6 +41,20 @@ builder.Services
     .AddScheme<AuthenticationSchemeOptions, BearerTokenAuthenticationHandler>(BearerTokenAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization();
 
+// The Blazor WASM client (CffVaultManager.Web.Client) is served by a separate host on a
+// different origin/port (CffVaultManager.Web), so its browser-side HttpClient calls here are
+// cross-origin. Only the origins explicitly listed in configuration are trusted — empty by
+// default, i.e. no cross-origin access unless configured. Credentials aren't needed: the client
+// authenticates via an Authorization header (Bearer JWT), never cookies.
+const string WebClientCorsPolicy = "WebClient";
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(WebClientCorsPolicy, policy => policy
+        .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+        .AllowAnyHeader()
+        .AllowAnyMethod());
+});
+
 // Per-IP fixed-window limiter on the unauthenticated auth endpoints (login/mfa-verify/refresh),
 // which are otherwise brute-forceable by an anonymous caller regardless of per-account lockout
 // (see AuthenticationService's FailedLoginAttempts/LockedUntil) — see docs/features/
@@ -78,6 +92,8 @@ else
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors(WebClientCorsPolicy);
 
 app.UseRateLimiter();
 

@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using System.Text;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Crypto;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -44,6 +46,12 @@ internal sealed class AuthenticationService : IAuthenticationService
     private static byte[]? _cachedDummyStoredHash;
     private static readonly object DummyStoredHashLock = new();
 
+    // Process-lifetime secret used only to derive a stable fake salt for PreloginAsync's
+    // unknown-email branch (see there): same reasoning and same caching pattern as
+    // _cachedDummyStoredHash above, just for a different anti-enumeration endpoint.
+    private static byte[]? _cachedPreloginPepper;
+    private static readonly object PreloginPepperLock = new();
+
     private readonly byte[] _dummyStoredHash;
 
     public AuthenticationService(
@@ -73,6 +81,42 @@ internal sealed class AuthenticationService : IAuthenticationService
         lock (DummyStoredHashLock)
         {
             return _cachedDummyStoredHash ??= hasher.Hash(RandomNumberGenerator.GetBytes(32));
+        }
+    }
+
+    public async Task<PreloginResult> PreloginAsync(string email, CancellationToken ct = default)
+    {
+        // The tenant is not known before authentication — same legitimate bypass as LoginAsync.
+        var user = await _db.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Email == email, ct);
+
+        if (user?.MasterPasswordSalt is null || user.KdfMemoryKb is null || user.KdfIterations is null || user.KdfVersion is null)
+        {
+            // Unknown email (or a SuperAdmin with no master password at all): return a fake salt
+            // that is stable for this email across every call for this process's lifetime — a
+            // fresh random salt on every call would itself be a tell (a real user's salt never
+            // changes between requests), and an error/empty response would leak non-existence
+            // outright. Default (production) KDF parameters keep the shape identical to a real
+            // response.
+            byte[] fakeSalt = HMACSHA256.HashData(GetOrCreatePreloginPepper(), Encoding.UTF8.GetBytes(email))[..16];
+            var defaults = Argon2Parameters.Default;
+            return new PreloginResult(fakeSalt, defaults.MemoryKb, defaults.Iterations, defaults.Version);
+        }
+
+        return new PreloginResult(user.MasterPasswordSalt, user.KdfMemoryKb.Value, user.KdfIterations.Value, user.KdfVersion.Value);
+    }
+
+    private static byte[] GetOrCreatePreloginPepper()
+    {
+        if (_cachedPreloginPepper is { } cached)
+        {
+            return cached;
+        }
+
+        lock (PreloginPepperLock)
+        {
+            return _cachedPreloginPepper ??= RandomNumberGenerator.GetBytes(32);
         }
     }
 
