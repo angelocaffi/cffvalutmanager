@@ -1,0 +1,163 @@
+@page "/login"
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@inject AuthApiClient AuthApi
+@inject IKeyDerivationService KeyDerivation
+@inject IAuthHashService AuthHashService
+@inject IDekService DekService
+@inject SessionState Session
+@inject NavigationManager Navigation
+
+<PageTitle>Accedi</PageTitle>
+
+<div class="login-card">
+    <h1>CffVaultManager</h1>
+
+    @if (_stage == Stage.Credentials)
+    {
+        <form @onsubmit="HandleCredentialsSubmitAsync" @onsubmit:preventDefault="true">
+            <label>
+                Email
+                <input type="email" @bind="_email" @bind:event="oninput" required disabled="@_busy" autocomplete="username" />
+            </label>
+            <label>
+                Master password
+                <input type="password" @bind="_masterPassword" @bind:event="oninput" required disabled="@_busy" autocomplete="current-password" />
+            </label>
+
+            @if (_errorMessage is not null)
+            {
+                <p class="login-error" role="alert">@_errorMessage</p>
+            }
+
+            <button type="submit" disabled="@_busy">@(_busy ? "Accesso in corso…" : "Accedi")</button>
+        </form>
+    }
+    else
+    {
+        <form @onsubmit="HandleMfaSubmitAsync" @onsubmit:preventDefault="true">
+            <p>Inserisci il codice a 6 cifre della tua app di autenticazione.</p>
+            <label>
+                Codice
+                <input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                       @bind="_mfaCode" @bind:event="oninput" required disabled="@_busy" />
+            </label>
+
+            @if (_errorMessage is not null)
+            {
+                <p class="login-error" role="alert">@_errorMessage</p>
+            }
+
+            <button type="submit" disabled="@_busy">@(_busy ? "Verifica in corso…" : "Verifica")</button>
+        </form>
+    }
+</div>
+
+@code {
+    private enum Stage { Credentials, Mfa }
+
+    private Stage _stage = Stage.Credentials;
+    private string _email = string.Empty;
+    private string _masterPassword = string.Empty;
+    private string _mfaCode = string.Empty;
+    private string? _errorMessage;
+    private bool _busy;
+    private string? _returnUrl;
+
+    // Kept only for the short window between the two login steps (an MFA challenge); never
+    // persisted anywhere, and zeroed as soon as it's no longer needed.
+    private byte[]? _pendingKek;
+    private string? _pendingChallengeToken;
+
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrlQuery { get; set; }
+
+    protected override void OnInitialized() => _returnUrl = ReturnUrlQuery;
+
+    private async Task HandleCredentialsSubmitAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var prelogin = await AuthApi.PreloginAsync(_email);
+            var kdfParams = new Argon2Parameters(prelogin.KdfMemoryKb, prelogin.KdfIterations, version: prelogin.KdfVersion);
+
+            using var kek = await KeyDerivation.DeriveKekAsync(_masterPassword, prelogin.MasterPasswordSalt, kdfParams);
+            byte[] authHash = AuthHashService.DeriveAuthHash(kek, _masterPassword);
+
+            var result = await AuthApi.LoginAsync(_email, authHash);
+
+            if (result.RequiresMfa)
+            {
+                _pendingKek = kek.Key.ToArray();
+                _pendingChallengeToken = result.MfaChallengeToken;
+                _stage = Stage.Mfa;
+                return;
+            }
+
+            if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
+            {
+                _errorMessage = "Email o master password errati.";
+                return;
+            }
+
+            CompleteLogin(result, kek.Key);
+        }
+        finally
+        {
+            _masterPassword = string.Empty;
+            _busy = false;
+        }
+    }
+
+    private async Task HandleMfaSubmitAsync()
+    {
+        if (_pendingKek is null || _pendingChallengeToken is null)
+        {
+            // Lost the in-memory KEK (e.g. the page was reloaded mid-flow) — nothing to unwrap
+            // the DEK with, so start over rather than get stuck on a form that can't succeed.
+            _stage = Stage.Credentials;
+            return;
+        }
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var result = await AuthApi.VerifyMfaAsync(_pendingChallengeToken, _mfaCode);
+
+            if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
+            {
+                _errorMessage = "Codice non valido.";
+                return;
+            }
+
+            CompleteLogin(result, _pendingKek);
+        }
+        finally
+        {
+            if (_pendingKek is not null)
+            {
+                CryptographicOperations.ZeroMemory(_pendingKek);
+                _pendingKek = null;
+            }
+
+            _mfaCode = string.Empty;
+            _busy = false;
+        }
+    }
+
+    private void CompleteLogin(LoginResponse result, ReadOnlySpan<byte> kek)
+    {
+        var wrappedDek = EncryptedBlob.FromBytes(result.CryptoMaterials!.EncryptedDek);
+        byte[] dek = DekService.DecryptDek(wrappedDek, kek);
+
+        var (userId, tenantId, role) = JwtParser.ParseAccessToken(result.AccessToken!);
+        Session.Establish(result.AccessToken!, result.RefreshToken!, dek, _email, userId, tenantId, role);
+
+        Navigation.NavigateTo(string.IsNullOrEmpty(_returnUrl) ? "/vault" : _returnUrl);
+    }
+}

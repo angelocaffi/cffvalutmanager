@@ -1,0 +1,47 @@
+@page "/vault"
+@attribute [Authorize]
+@inject VaultApiClient VaultApi
+@inject SessionState Session
+@inject NavigationManager Navigation
+
+<PageTitle>Vault</PageTitle>
+
+<div class="vault-page">
+    <div class="vault-header">
+        <h1>Vault</h1>
+        <button type="button" @onclick="Lock">Blocca</button>
+    </div>
+
+    @if (_vaults is null)
+    {
+        <p>Caricamento…</p>
+    }
+    else if (_vaults.Count == 0)
+    {
+        <p>Nessun vault trovato.</p>
+    }
+    else
+    {
+        <ul>
+            @foreach (var vault in _vaults)
+            {
+                <li>@vault.Name @(vault.IsOrganizationVault ? "(organizzazione)" : "(personale)")</li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<VaultResponse>? _vaults;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _vaults = await VaultApi.ListVaultsAsync();
+    }
+
+    private void Lock()
+    {
+        Session.Clear();
+        Navigation.NavigateTo("/login");
+    }
+}

@@ -10,11 +10,15 @@
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["CffVaultManager.Web.styles.css"]" />
     <ImportMap />
-    <HeadOutlet @rendermode="InteractiveWebAssembly" />
+    @* prerender: false on both outlets below — the vault's unlocked state (DEK, tokens) only ever
+       exists in the WASM client's memory; there is nothing meaningful to render on the server, and
+       every WASM-only service (SessionState, crypto, the Api HttpClient) would otherwise need a
+       server-side counterpart just to satisfy a prerender pass. *@
+    <HeadOutlet @rendermode="new InteractiveWebAssemblyRenderMode(prerender: false)" />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveWebAssembly" />
+    <Routes @rendermode="new InteractiveWebAssemblyRenderMode(prerender: false)" />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 

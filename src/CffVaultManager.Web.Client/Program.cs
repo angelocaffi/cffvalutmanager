@@ -23,4 +23,10 @@ builder.Services.AddHttpClient("Api", client =>
     client.BaseAddress = new Uri(builder.Configuration["Api:BaseUrl"] ?? builder.HostEnvironment.BaseAddress))
     .AddHttpMessageHandler<BearerTokenHandler>();
 
+// Typed API clients all resolve the same named "Api" HttpClient — new ones (vault items, cards,
+// wallets, memberships) just add another AddScoped<TClient> line here, reusing this factory.
+builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("Api"));
+builder.Services.AddScoped<AuthApiClient>();
+builder.Services.AddScoped<VaultApiClient>();
+
 await builder.Build().RunAsync();
