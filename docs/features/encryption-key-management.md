@@ -15,7 +15,8 @@ Fornire l'implementazione concreta della gerarchia di chiavi definita in [../sec
 
 ## Requisiti di sicurezza
 
-- Uso esclusivo di API crittografiche standard e testate (`System.Security.Cryptography` in .NET, libreria Argon2 validata) — nessuna implementazione custom di primitive crittografiche.
+- Uso esclusivo di API crittografiche standard e testate — nessuna implementazione custom di primitive crittografiche. Non necessariamente `System.Security.Cryptography`: dove il BCL non funziona sotto Blazor WASM (vedi nota sotto), si usa una libreria managed validata e ampiamente adottata (es. `BouncyCastle.Cryptography`) invece di reimplementare l'algoritmo.
+- **Nota — `System.Security.Cryptography.AesGcm` non funziona in Blazor WASM**: verificato live in browser che lancia `PlatformNotSupportedException` sotto il runtime `browser-wasm` (nessun provider crittografico nativo del sistema operativo disponibile lì). `AesGcmCipherService` usa quindi `BouncyCastle.Cryptography` (`GcmBlockCipher`, managed puro, nessuna dipendenza nativa) — stesso identico comportamento su .NET desktop/server e su WASM, stessa interfaccia `IAeadCipherService` e formato `EncryptedBlob`, nessun impatto sui chiamanti. Stessa categoria di scelta già fatta per Argon2id (`Konscious.Security.Cryptography.Argon2`, `DegreeOfParallelism = 1` forzato per compatibilità WASM) — qualunque primitiva usata lato client deve essere verificata in un browser reale prima di considerarla WASM-compatibile, non solo compilata/testata sul runtime .NET server-side (questo bug in `AesGcmCipherService` è rimasto invisibile per diverse iterazioni proprio perché i 122 test del progetto Crypto girano sul runtime .NET normale, non dentro un browser).
 - Nonce/IV generati con `RandomNumberGenerator.Fill` (o equivalente), mai riutilizzati per la stessa chiave.
 - Parametri Argon2id scelti bilanciando sicurezza e UX (tempo di derivazione target: ~300-500ms su hardware client medio).
 - Chiavi (KEK, DEK in chiaro) devono avere lifetime minimo in memoria; azzerare i buffer dopo l'uso dove il linguaggio lo consente (`Span<byte>`, `CryptographicOperations.ZeroMemory`).
@@ -28,4 +29,4 @@ Fornire l'implementazione concreta della gerarchia di chiavi definita in [../sec
 
 ## Stato
 
-Da pianificare. Componente fondazionale: va implementato e testato prima di qualunque feature che persista secrets.
+Implementato in `CffVaultManager.Crypto`: derivazione Argon2id, generazione/cifratura DEK, `AesGcmCipherService` (ora su BouncyCastle per compatibilità WASM, vedi sopra), 122 test. Manca ancora: la rotazione DEK e il cambio master password come procedure applicative complete (i primitivi crittografici che servirebbero loro esistono già).
