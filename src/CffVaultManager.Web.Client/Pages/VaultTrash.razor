@@ -92,6 +92,8 @@ else
                 VaultItemTypes.Password => JsonSerializer.Deserialize<PasswordPayload>(plaintext)!.Title,
                 VaultItemTypes.CreditCard => JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!.Title,
                 VaultItemTypes.CryptoWallet => JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!.Label,
+                VaultItemTypes.SecureNote => JsonSerializer.Deserialize<SecureNotePayload>(plaintext)!.Title,
+                VaultItemTypes.GenericSecret => JsonSerializer.Deserialize<GenericSecretPayload>(plaintext)!.Title,
                 _ => "(tipo sconosciuto)",
             };
         }

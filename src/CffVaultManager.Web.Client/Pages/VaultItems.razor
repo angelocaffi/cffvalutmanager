@@ -21,6 +21,8 @@
             <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
             <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
             <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
+            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.SecureNote)">Nota sicura</a></li>
+            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.GenericSecret)">Secret generico</a></li>
         </ul>
     </div>
 </div>
@@ -33,6 +35,8 @@
         <option value="@VaultItemTypes.Password">Password</option>
         <option value="@VaultItemTypes.CreditCard">Carte di credito</option>
         <option value="@VaultItemTypes.CryptoWallet">Crypto wallet</option>
+        <option value="@VaultItemTypes.SecureNote">Note sicure</option>
+        <option value="@VaultItemTypes.GenericSecret">Secret generici</option>
     </select>
     <a class="btn btn-outline-secondary ms-auto" href="@($"/vault/{VaultId}/trash")">Cestino</a>
 </div>
@@ -124,6 +128,8 @@ else
                 VaultItemTypes.Password => FromPassword(JsonSerializer.Deserialize<PasswordPayload>(plaintext)!),
                 VaultItemTypes.CreditCard => FromCreditCard(JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!),
                 VaultItemTypes.CryptoWallet => FromCryptoWallet(JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!),
+                VaultItemTypes.SecureNote => FromSecureNote(JsonSerializer.Deserialize<SecureNotePayload>(plaintext)!),
+                VaultItemTypes.GenericSecret => FromGenericSecret(JsonSerializer.Deserialize<GenericSecretPayload>(plaintext)!),
                 _ => new DecryptedSummary("(tipo sconosciuto)", null),
             };
         }
@@ -155,6 +161,18 @@ else
         }
 
         return new DecryptedSummary(payload.Label, subtitle);
+    }
+
+    private static DecryptedSummary FromSecureNote(SecureNotePayload payload)
+    {
+        string? preview = string.IsNullOrWhiteSpace(payload.Content) ? null : payload.Content.Length > 60 ? $"{payload.Content[..60]}…" : payload.Content;
+        return new DecryptedSummary(payload.Title, preview);
+    }
+
+    private static DecryptedSummary FromGenericSecret(GenericSecretPayload payload)
+    {
+        string? subtitle = payload.Fields.Count > 0 ? string.Join(", ", payload.Fields.Select(f => f.Key)) : null;
+        return new DecryptedSummary(payload.Title, subtitle);
     }
 
     private bool MatchesFilter(VaultItemResponse item)

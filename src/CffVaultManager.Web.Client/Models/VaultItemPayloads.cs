@@ -42,3 +42,16 @@ public sealed record CryptoWalletPayload(
 {
     public static CryptoWalletPayload Empty { get; } = new(string.Empty, null, [], null, null, null);
 }
+
+public sealed record SecureNotePayload(string Title, string? Content)
+{
+    public static SecureNotePayload Empty { get; } = new(string.Empty, null);
+}
+
+/// <summary>A user-defined key/value pair (API key, SSH key, PIN, etc.) — see docs/features/vault-core.md "Secrets generici", which deliberately has no fixed schema.</summary>
+public sealed record GenericSecretField(string Key, string Value);
+
+public sealed record GenericSecretPayload(string Title, IReadOnlyList<GenericSecretField> Fields, string? Notes)
+{
+    public static GenericSecretPayload Empty { get; } = new(string.Empty, [], null);
+}

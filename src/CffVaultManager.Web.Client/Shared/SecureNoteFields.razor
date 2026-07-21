@@ -1,0 +1,19 @@
+@using CffVaultManager.Web.Client.Models
+
+<div class="mb-3">
+    <label class="form-label">Titolo</label>
+    <input class="form-control" @bind="Model.Title" @bind:event="oninput" disabled="@Disabled" required />
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Contenuto</label>
+    <textarea class="form-control" rows="8" @bind="Model.Content" @bind:event="oninput" disabled="@Disabled"></textarea>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public SecureNoteFormModel Model { get; set; } = null!;
+
+    [Parameter]
+    public bool Disabled { get; set; }
+}

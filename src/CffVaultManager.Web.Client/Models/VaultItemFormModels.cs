@@ -86,3 +86,45 @@ public sealed class CryptoWalletFormModel
         string.IsNullOrWhiteSpace(Mnemonic) ? null : Mnemonic,
         string.IsNullOrWhiteSpace(Notes) ? null : Notes);
 }
+
+public sealed class SecureNoteFormModel
+{
+    public string Title { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+
+    public static SecureNoteFormModel FromPayload(SecureNotePayload payload) => new()
+    {
+        Title = payload.Title,
+        Content = payload.Content ?? string.Empty,
+    };
+
+    public SecureNotePayload ToPayload() => new(Title, string.IsNullOrWhiteSpace(Content) ? null : Content);
+}
+
+/// <summary>One row of a <see cref="GenericSecretFormModel"/>'s field list — a mutable class so a <c>@for</c>-rendered row can bind directly to it.</summary>
+public sealed class KeyValueFieldModel
+{
+    public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+}
+
+public sealed class GenericSecretFormModel
+{
+    public string Title { get; set; } = string.Empty;
+    public List<KeyValueFieldModel> Fields { get; set; } = [new()];
+    public string Notes { get; set; } = string.Empty;
+
+    public static GenericSecretFormModel FromPayload(GenericSecretPayload payload) => new()
+    {
+        Title = payload.Title,
+        Fields = payload.Fields.Count > 0
+            ? [.. payload.Fields.Select(f => new KeyValueFieldModel { Key = f.Key, Value = f.Value })]
+            : [new()],
+        Notes = payload.Notes ?? string.Empty,
+    };
+
+    public GenericSecretPayload ToPayload() => new(
+        Title,
+        [.. Fields.Where(f => !string.IsNullOrWhiteSpace(f.Key)).Select(f => new GenericSecretField(f.Key, f.Value))],
+        string.IsNullOrWhiteSpace(Notes) ? null : Notes);
+}

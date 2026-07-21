@@ -46,6 +46,14 @@ else
         {
             <CryptoWalletFields Model="_cryptoWalletModel" Disabled="_busy" OnRevealSensitiveField="RecordRevealAsync" />
         }
+        else if (_effectiveType == VaultItemTypes.SecureNote)
+        {
+            <SecureNoteFields Model="_secureNoteModel" Disabled="_busy" />
+        }
+        else if (_effectiveType == VaultItemTypes.GenericSecret)
+        {
+            <GenericSecretFields Model="_genericSecretModel" Disabled="_busy" />
+        }
         else
         {
             <div class="alert alert-warning" role="alert">Tipo di voce non supportato: @_effectiveType.</div>
@@ -93,6 +101,8 @@ else
     private PasswordFormModel _passwordModel = new();
     private CreditCardFormModel _creditCardModel = new();
     private CryptoWalletFormModel _cryptoWalletModel = new();
+    private SecureNoteFormModel _secureNoteModel = new();
+    private GenericSecretFormModel _genericSecretModel = new();
 
     // The password as it was before this edit session, to detect a real change and push the old
     // value into PasswordHistory (docs/features/password-manager.md) — never set for a new item.
@@ -122,6 +132,8 @@ else
                 _passwordModel = new PasswordFormModel();
                 _creditCardModel = new CreditCardFormModel();
                 _cryptoWalletModel = new CryptoWalletFormModel();
+                _secureNoteModel = new SecureNoteFormModel();
+                _genericSecretModel = new GenericSecretFormModel();
                 _originalPassword = null;
             }
         }
@@ -153,6 +165,14 @@ else
             {
                 _cryptoWalletModel = CryptoWalletFormModel.FromPayload(JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!);
             }
+            else if (item.Type == VaultItemTypes.SecureNote)
+            {
+                _secureNoteModel = SecureNoteFormModel.FromPayload(JsonSerializer.Deserialize<SecureNotePayload>(plaintext)!);
+            }
+            else if (item.Type == VaultItemTypes.GenericSecret)
+            {
+                _genericSecretModel = GenericSecretFormModel.FromPayload(JsonSerializer.Deserialize<GenericSecretPayload>(plaintext)!);
+            }
         }
         catch (CryptographicException)
         {
@@ -179,6 +199,14 @@ else
             else if (_effectiveType == VaultItemTypes.CryptoWallet)
             {
                 plaintext = JsonSerializer.SerializeToUtf8Bytes(_cryptoWalletModel.ToPayload());
+            }
+            else if (_effectiveType == VaultItemTypes.SecureNote)
+            {
+                plaintext = JsonSerializer.SerializeToUtf8Bytes(_secureNoteModel.ToPayload());
+            }
+            else if (_effectiveType == VaultItemTypes.GenericSecret)
+            {
+                plaintext = JsonSerializer.SerializeToUtf8Bytes(_genericSecretModel.ToPayload());
             }
             else
             {
