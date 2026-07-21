@@ -11,6 +11,24 @@ internal static class JwtParser
 {
     public static (Guid UserId, Guid? TenantId, string Role) ParseAccessToken(string jwt)
     {
+        var root = ParsePayload(jwt);
+
+        Guid userId = Guid.Parse(root.GetProperty("sub").GetString()!);
+        Guid? tenantId = root.TryGetProperty("tenant_id", out var tenantProp) ? Guid.Parse(tenantProp.GetString()!) : null;
+        string role = root.GetProperty("role").GetString()!;
+
+        return (userId, tenantId, role);
+    }
+
+    /// <summary>The token's "exp" claim (standard JWT expiry, seconds since Unix epoch), used to schedule a silent refresh ahead of time.</summary>
+    public static DateTimeOffset GetExpiryUtc(string jwt)
+    {
+        var root = ParsePayload(jwt);
+        return DateTimeOffset.FromUnixTimeSeconds(root.GetProperty("exp").GetInt64());
+    }
+
+    private static JsonElement ParsePayload(string jwt)
+    {
         string[] parts = jwt.Split('.');
         if (parts.Length < 2)
         {
@@ -19,13 +37,7 @@ internal static class JwtParser
 
         byte[] payloadBytes = Convert.FromBase64String(PadBase64Url(parts[1]));
         using var doc = JsonDocument.Parse(payloadBytes);
-        var root = doc.RootElement;
-
-        Guid userId = Guid.Parse(root.GetProperty("sub").GetString()!);
-        Guid? tenantId = root.TryGetProperty("tenant_id", out var tenantProp) ? Guid.Parse(tenantProp.GetString()!) : null;
-        string role = root.GetProperty("role").GetString()!;
-
-        return (userId, tenantId, role);
+        return doc.RootElement.Clone();
     }
 
     private static string PadBase64Url(string base64Url)

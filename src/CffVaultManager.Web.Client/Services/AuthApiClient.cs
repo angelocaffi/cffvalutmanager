@@ -34,6 +34,17 @@ public sealed class AuthApiClient
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
 
+    /// <summary>
+    /// Silently renews the access/refresh token pair. Returns null only on a network-level
+    /// failure (caller should retry); an expired/revoked refresh token instead comes back as a
+    /// normal <c>Success: false</c> result, same shape as a failed login.
+    /// </summary>
+    public async Task<LoginResponse?> RefreshAsync(string refreshToken, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/refresh", new { RefreshToken = refreshToken }, ct);
+        return await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct);
+    }
+
     public async Task<LoginResponse> VerifyMfaAsync(string challengeToken, string code, string factor, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync(

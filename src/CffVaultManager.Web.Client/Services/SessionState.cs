@@ -17,6 +17,9 @@ public sealed class SessionState
 
     public string? RefreshToken { get; private set; }
 
+    /// <summary>The current access token's "exp" claim, so <see cref="TokenRefreshScheduler"/> can renew it shortly before it lapses.</summary>
+    public DateTimeOffset? AccessTokenExpiresAtUtc { get; private set; }
+
     public string? Email { get; private set; }
 
     public Guid? UserId { get; private set; }
@@ -35,6 +38,7 @@ public sealed class SessionState
     {
         AccessToken = accessToken;
         RefreshToken = refreshToken;
+        AccessTokenExpiresAtUtc = JwtParser.GetExpiryUtc(accessToken);
         _dek = dek;
         Email = email;
         UserId = userId;
@@ -48,6 +52,7 @@ public sealed class SessionState
     {
         AccessToken = accessToken;
         RefreshToken = refreshToken;
+        AccessTokenExpiresAtUtc = JwtParser.GetExpiryUtc(accessToken);
         Changed?.Invoke();
     }
 
@@ -64,6 +69,7 @@ public sealed class SessionState
         _dek = null;
         AccessToken = null;
         RefreshToken = null;
+        AccessTokenExpiresAtUtc = null;
         Email = null;
         UserId = null;
         TenantId = null;

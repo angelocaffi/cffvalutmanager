@@ -37,5 +37,12 @@ builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
+builder.Services.AddScoped<TokenRefreshScheduler>();
 
-await builder.Build().RunAsync();
+var host = builder.Build();
+
+// Resolved eagerly (never injected into a component) purely so its constructor subscribes to
+// SessionState.Changed from app startup, regardless of which page is first navigated to.
+host.Services.GetRequiredService<TokenRefreshScheduler>();
+
+await host.RunAsync();
