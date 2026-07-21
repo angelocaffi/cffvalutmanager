@@ -1,0 +1,167 @@
+@page "/register"
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@inject AuthApiClient AuthApi
+@inject IKeyDerivationService KeyDerivation
+@inject IAuthHashService AuthHashService
+@inject IDekService DekService
+@inject NavigationManager Navigation
+
+<PageTitle>Crea organizzazione</PageTitle>
+
+<div class="login-shell d-flex justify-content-center">
+    <div class="card shadow-sm login-card">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="login-logo mb-2" />
+                <h1 class="h4 mb-0 text-primary">Crea la tua organizzazione</h1>
+            </div>
+
+            @if (_done)
+            {
+                <p class="text-success">Organizzazione creata. Puoi ora accedere con le credenziali appena scelte.</p>
+                <a class="btn btn-info w-100" href="/login">Vai al login</a>
+            }
+            else
+            {
+                <form @onsubmit="HandleSubmitAsync" @onsubmit:preventDefault="true">
+                    <div class="mb-3">
+                        <label for="reg-org-name" class="form-label">Nome organizzazione</label>
+                        <input id="reg-org-name" class="form-control" @bind="_tenantName" @bind:event="oninput"
+                               @bind:after="SyncSlugFromName" required disabled="@_busy" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-org-slug" class="form-label">Identificativo (slug)</label>
+                        <input id="reg-org-slug" class="form-control" @bind="_tenantSlug" @bind:event="oninput"
+                               @bind:after="() => _slugManuallyEdited = true" required disabled="@_busy" pattern="[a-z0-9\-]+" />
+                        <div class="form-text">Solo lettere minuscole, numeri e trattini. Deve essere univoco.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-email" class="form-label">Email amministratore</label>
+                        <input id="reg-email" type="email" class="form-control" @bind="_adminEmail" @bind:event="oninput"
+                               required disabled="@_busy" autocomplete="username" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-password" class="form-label">Master password</label>
+                        <input id="reg-password" type="password" class="form-control" @bind="_masterPassword" @bind:event="oninput"
+                               required disabled="@_busy" minlength="12" autocomplete="new-password" />
+                        <div class="form-text">Almeno 12 caratteri. Non lascia mai il browser: viene usata solo per derivare la chiave di cifratura.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-password-confirm" class="form-label">Conferma master password</label>
+                        <input id="reg-password-confirm" type="password" class="form-control" @bind="_masterPasswordConfirm" @bind:event="oninput"
+                               required disabled="@_busy" autocomplete="new-password" />
+                    </div>
+
+                    @if (_errorMessage is not null)
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                    }
+
+                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        @(_busy ? "Creazione in corso…" : "Crea organizzazione")
+                    </button>
+                </form>
+
+                <p class="text-center small text-body-secondary mt-3 mb-0">
+                    Hai già un account? <a href="/login">Accedi</a>
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _tenantName = string.Empty;
+    private string _tenantSlug = string.Empty;
+    private bool _slugManuallyEdited;
+    private string _adminEmail = string.Empty;
+    private string _masterPassword = string.Empty;
+    private string _masterPasswordConfirm = string.Empty;
+    private string? _errorMessage;
+    private bool _busy;
+    private bool _done;
+
+    private void SyncSlugFromName()
+    {
+        if (_slugManuallyEdited)
+        {
+            return;
+        }
+
+        _tenantSlug = Slugify(_tenantName);
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        _errorMessage = null;
+
+        if (_masterPassword != _masterPasswordConfirm)
+        {
+            _errorMessage = "Le due master password non coincidono.";
+            return;
+        }
+
+        if (_masterPassword.Length < 12)
+        {
+            _errorMessage = "La master password deve avere almeno 12 caratteri.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            byte[] salt = RandomNumberGenerator.GetBytes(16);
+            var kdfParams = Argon2Parameters.Default;
+
+            using var kek = await KeyDerivation.DeriveKekAsync(_masterPassword, salt, kdfParams);
+            byte[] authHash = AuthHashService.DeriveAuthHash(kek, _masterPassword);
+
+            byte[] dek = DekService.GenerateDek();
+            byte[] encryptedDek = DekService.EncryptDek(dek, kek.Key).ToBytes();
+            CryptographicOperations.ZeroMemory(dek);
+
+            var (success, error) = await AuthApi.ProvisionTenantAsync(
+                _tenantName, _tenantSlug, _adminEmail, authHash, encryptedDek, salt,
+                kdfParams.MemoryKb, kdfParams.Iterations, kdfParams.Version);
+
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _done = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Slugify(string name)
+    {
+        var builder = new System.Text.StringBuilder();
+        bool lastWasDash = false;
+        foreach (char c in name.Trim().ToLowerInvariant())
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+            {
+                builder.Append(c);
+                lastWasDash = false;
+            }
+            else if (!lastWasDash && builder.Length > 0)
+            {
+                builder.Append('-');
+                lastWasDash = true;
+            }
+        }
+
+        return builder.ToString().TrimEnd('-');
+    }
+}

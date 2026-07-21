@@ -22,6 +22,46 @@ public sealed class AuthApiClient
 
     public AuthApiClient(HttpClient http) => _http = http;
 
+    /// <summary>
+    /// Creates a new tenant and its first Admin user. All crypto material (auth hash, wrapped
+    /// DEK, salt, KDF parameters) is generated client-side and sent as opaque bytes — the server
+    /// never sees the master password or the unwrapped DEK. Fails with a 409-derived message if
+    /// the slug or admin email is already taken.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ProvisionTenantAsync(
+        string tenantName,
+        string tenantSlug,
+        string adminEmail,
+        byte[] authHash,
+        byte[] encryptedDek,
+        byte[] masterPasswordSalt,
+        int kdfMemoryKb,
+        int kdfIterations,
+        int kdfVersion,
+        CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/tenants", new
+        {
+            TenantName = tenantName,
+            TenantSlug = tenantSlug,
+            AdminEmail = adminEmail,
+            AuthHash = authHash,
+            EncryptedDek = encryptedDek,
+            MasterPasswordSalt = masterPasswordSalt,
+            KdfMemoryKb = kdfMemoryKb,
+            KdfIterations = kdfIterations,
+            KdfVersion = kdfVersion,
+        }, ct);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return (true, null);
+        }
+
+        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+        return (false, problem?.Error ?? "Impossibile creare l'organizzazione.");
+    }
+
     public async Task<PreloginResponse> PreloginAsync(string email, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/api/auth/prelogin", new { Email = email }, ct);
