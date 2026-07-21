@@ -74,6 +74,17 @@ public class Pbkdf2KeyDerivationServiceTests
     }
 
     [Fact]
+    public async Task DeriveKekAsync_ProducesTheSameKeyAsTheSyncVersion_ForSameInputs()
+    {
+        byte[] salt = NewSalt();
+
+        using DerivedKey sync = _kdf.DeriveKek("hunter2 hunter2", salt, Params);
+        using DerivedKey async = await _kdf.DeriveKekAsync("hunter2 hunter2", salt, Params);
+
+        Assert.Equal(sync.Key.ToArray(), async.Key.ToArray());
+    }
+
+    [Fact]
     public void Constructor_EnforcesIterationFloor()
     {
         Assert.Equal(600_000, Pbkdf2KeyDerivationService.MinimumIterations);

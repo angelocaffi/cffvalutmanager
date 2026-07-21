@@ -52,6 +52,12 @@ public sealed class Pbkdf2KeyDerivationService : IKeyDerivationService
         }
     }
 
+    // Rfc2898DeriveBytes.Pbkdf2 is a plain synchronous computation with no internal blocking
+    // wait (unlike Konscious's Argon2.GetBytes — see IKeyDerivationService.DeriveKekAsync), so
+    // there is nothing WASM-unsafe to work around here; this is just an interface formality.
+    public Task<DerivedKey> DeriveKekAsync(string masterPassword, byte[] salt, Argon2Parameters parameters) =>
+        Task.FromResult(DeriveKek(masterPassword.AsSpan(), salt, parameters));
+
     private static byte[] EncodeToUtf8(ReadOnlySpan<char> chars)
     {
         int byteCount = Encoding.UTF8.GetByteCount(chars);

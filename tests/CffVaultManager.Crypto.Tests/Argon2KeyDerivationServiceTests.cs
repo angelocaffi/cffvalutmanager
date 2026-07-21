@@ -57,6 +57,42 @@ public class Argon2KeyDerivationServiceTests
     }
 
     [Fact]
+    public async Task DeriveKekAsync_ProducesTheSameKeyAsTheSyncVersion_ForSameInputs()
+    {
+        byte[] salt = NewSalt();
+        const string password = "correct horse battery staple";
+
+        using DerivedKey sync = _kdf.DeriveKek(password, salt, TestParams);
+        using DerivedKey async = await _kdf.DeriveKekAsync(password, salt, TestParams);
+
+        Assert.Equal(sync.Key.ToArray(), async.Key.ToArray());
+    }
+
+    [Fact]
+    public async Task DeriveKekAsync_IsDeterministic_ForSameInputs()
+    {
+        byte[] salt = NewSalt();
+
+        using DerivedKey a = await _kdf.DeriveKekAsync("correct horse battery staple", salt, TestParams);
+        using DerivedKey b = await _kdf.DeriveKekAsync("correct horse battery staple", salt, TestParams);
+
+        Assert.Equal(CryptoConstants.KeyLengthBytes, a.Length);
+        Assert.Equal(a.Key.ToArray(), b.Key.ToArray());
+    }
+
+    [Fact]
+    public async Task DeriveKekAsync_EmptyPassword_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _kdf.DeriveKekAsync(string.Empty, NewSalt(), TestParams));
+    }
+
+    [Fact]
+    public async Task DeriveKekAsync_EmptySalt_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _kdf.DeriveKekAsync("password", Array.Empty<byte>(), TestParams));
+    }
+
+    [Fact]
     public void DegreeOfParallelism_IsAlwaysOne_RegardlessOfRequest()
     {
         // Constructor coerces the value to 1...

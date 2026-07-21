@@ -43,6 +43,40 @@ public sealed class Argon2KeyDerivationService : IKeyDerivationService
         }
     }
 
+    public async Task<DerivedKey> DeriveKekAsync(string masterPassword, byte[] salt, Argon2Parameters parameters)
+    {
+        if (string.IsNullOrEmpty(masterPassword))
+        {
+            throw new ArgumentException("Master password must not be empty.", nameof(masterPassword));
+        }
+
+        ArgumentNullException.ThrowIfNull(salt);
+        if (salt.Length == 0)
+        {
+            throw new ArgumentException("Salt must not be empty.", nameof(salt));
+        }
+
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        byte[] passwordBytes = Encoding.UTF8.GetBytes(masterPassword);
+        try
+        {
+            using var argon2 = new Argon2id(passwordBytes)
+            {
+                Salt = salt,
+                DegreeOfParallelism = Argon2Parameters.EnforcedDegreeOfParallelism,
+                Iterations = parameters.Iterations,
+                MemorySize = parameters.MemoryKb,
+            };
+
+            return new DerivedKey(await argon2.GetBytesAsync(CryptoConstants.KeyLengthBytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(passwordBytes);
+        }
+    }
+
     private static byte[] EncodeToUtf8(ReadOnlySpan<char> chars)
     {
         int byteCount = Encoding.UTF8.GetByteCount(chars);

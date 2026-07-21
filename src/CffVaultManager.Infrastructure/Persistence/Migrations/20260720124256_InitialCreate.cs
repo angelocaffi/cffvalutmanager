@@ -134,7 +134,17 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                         column: x => x.VaultId,
                         principalTable: "Vaults",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        // Restrict, not Cascade: SQL Server refuses to create this schema
+                        // otherwise (a Vault delete would reach VaultItems through two competing
+                        // paths — directly via FK_VaultItems_Vaults_VaultId's Cascade, and
+                        // indirectly through this Folder cascade combined with
+                        // FK_VaultItems_Folders_FolderId's SetNull). Never caught before this
+                        // migration was first run against real SQL Server (the whole test suite
+                        // runs against SQLite, which doesn't enforce this) — see
+                        // FixVaultFolderCascadePath's removal in git history for the full story;
+                        // folded directly into InitialCreate here since it never successfully
+                        // applied against SQL Server with the Cascade value in the first place.
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -160,7 +170,10 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                         column: x => x.VaultId,
                         principalTable: "Vaults",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        // Restrict, not Cascade — same reasoning as FK_Folders_Vaults_VaultId
+                        // above: a Vault delete would otherwise reach VaultItemTags through two
+                        // competing cascade paths (via Tag and via VaultItem, both Cascade).
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(

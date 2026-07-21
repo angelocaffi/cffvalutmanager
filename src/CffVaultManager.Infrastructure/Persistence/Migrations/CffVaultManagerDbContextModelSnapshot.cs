@@ -60,7 +60,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId", "Timestamp");
 
-                    b.ToTable("AuditLogEntries");
+                    b.ToTable("AuditLogEntries", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.Folder", b =>
@@ -87,7 +87,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                     b.HasIndex("VaultId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Folders");
+                    b.ToTable("Folders", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.OneTimeCode", b =>
@@ -134,7 +134,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId", "Purpose", "ExpiresAt");
 
-                    b.ToTable("OneTimeCodes");
+                    b.ToTable("OneTimeCodes", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.RefreshToken", b =>
@@ -176,7 +176,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId", "ExpiresAt");
 
-                    b.ToTable("RefreshTokens");
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.Tag", b =>
@@ -203,7 +203,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                     b.HasIndex("VaultId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Tags");
+                    b.ToTable("Tags", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.Tenant", b =>
@@ -244,7 +244,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("Tenants");
+                    b.ToTable("Tenants", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.User", b =>
@@ -321,7 +321,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "Email");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.Vault", b =>
@@ -352,7 +352,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "OwnerUserId");
 
-                    b.ToTable("Vaults");
+                    b.ToTable("Vaults", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.VaultItem", b =>
@@ -410,7 +410,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "VaultId", "IsDeleted");
 
-                    b.ToTable("VaultItems");
+                    b.ToTable("VaultItems", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.VaultItemTag", b =>
@@ -425,7 +425,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TagId");
 
-                    b.ToTable("VaultItemTags");
+                    b.ToTable("VaultItemTags", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.VaultMembership", b =>
@@ -476,7 +476,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("[RevokedAt] IS NULL");
 
-                    b.ToTable("VaultMemberships");
+                    b.ToTable("VaultMemberships", (string)null);
                 });
 
             modelBuilder.Entity("CffVaultManager.Domain.Entities.AuditLogEntry", b =>
@@ -513,7 +513,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                     b.HasOne("CffVaultManager.Domain.Entities.Vault", "Vault")
                         .WithMany("Folders")
                         .HasForeignKey("VaultId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Vault");
@@ -552,7 +552,7 @@ namespace CffVaultManager.Infrastructure.Persistence.Migrations
                     b.HasOne("CffVaultManager.Domain.Entities.Vault", "Vault")
                         .WithMany("Tags")
                         .HasForeignKey("VaultId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Vault");
