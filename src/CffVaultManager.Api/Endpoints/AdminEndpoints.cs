@@ -22,6 +22,34 @@ internal static class AdminEndpoints
             return usage is null ? Results.NotFound() : Results.Ok(usage);
         });
 
+        group.MapPost("/tenants/{tenantId:guid}/suspend", async (
+            Guid tenantId, ITenantAdministrationService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                await service.SuspendTenantAsync(tenantId, tenantContext.UserId!.Value, ct);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        group.MapPost("/tenants/{tenantId:guid}/reactivate", async (
+            Guid tenantId, ITenantAdministrationService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                await service.ReactivateTenantAsync(tenantId, tenantContext.UserId!.Value, ct);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
         return app;
     }
 }

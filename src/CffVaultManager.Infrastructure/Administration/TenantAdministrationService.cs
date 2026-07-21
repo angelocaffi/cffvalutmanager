@@ -1,5 +1,7 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Administration;
+using CffVaultManager.Domain.Entities;
+using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -69,5 +71,25 @@ internal sealed class TenantAdministrationService : ITenantAdministrationService
             vaultCount,
             vaultItemCount,
             lastLogin);
+    }
+
+    public async Task SuspendTenantAsync(Guid tenantId, Guid callerId, CancellationToken ct = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tenantId, ct)
+            ?? throw new KeyNotFoundException("Tenant not found.");
+
+        tenant.Status = TenantStatus.Suspended;
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, AuditAction.TenantSuspended));
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task ReactivateTenantAsync(Guid tenantId, Guid callerId, CancellationToken ct = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tenantId, ct)
+            ?? throw new KeyNotFoundException("Tenant not found.");
+
+        tenant.Status = TenantStatus.Active;
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, AuditAction.TenantReactivated));
+        await _db.SaveChangesAsync(ct);
     }
 }

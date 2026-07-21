@@ -225,6 +225,85 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task Login_when_tenant_is_suspended_fails()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, _) = await ProvisionAsync(authHash);
+        await SuspendTenantAsync(tenantId);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AccessToken);
+        Assert.Null(result.CryptoMaterials);
+    }
+
+    [Fact]
+    public async Task VerifyMfa_when_tenant_is_suspended_after_challenge_fails()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var secret = _totp.GenerateSecret();
+        await EnableMfaAsync(tenantId, adminId, secret);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+        await SuspendTenantAsync(tenantId);
+        var code = new OtpNet.Totp(secret).ComputeTotp();
+
+        var result = await auth.VerifyMfaAsync(challenge, code, null, null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AccessToken);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_when_tenant_is_suspended_fails()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, _) = await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var login = await auth.LoginAsync("admin@x.com", authHash, null, null);
+        await SuspendTenantAsync(tenantId);
+
+        var refreshed = await auth.RefreshAsync(login.RefreshToken!, null, null);
+
+        Assert.False(refreshed.Success);
+        Assert.Null(refreshed.AccessToken);
+    }
+
+    [Fact]
+    public async Task Login_after_reactivation_succeeds_again()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, _) = await ProvisionAsync(authHash);
+        await SuspendTenantAsync(tenantId);
+
+        using (var ctx = CreateContext(SuperAdmin()))
+        {
+            var tenant = await ctx.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Id == tenantId);
+            tenant.Status = TenantStatus.Active;
+            await ctx.SaveChangesAsync();
+        }
+
+        using var verifyCtx = CreateContext(Unresolved());
+        var auth = CreateAuthService(verifyCtx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
+    }
+
+    [Fact]
     public async Task RefreshAsync_with_valid_token_issues_new_session()
     {
         var authHash = RandomAuthHash();
@@ -354,6 +433,14 @@ public sealed class AuthenticationTests : IDisposable
         var service = new ProvisionTenantService(ctx, _authHashHasher);
         var result = await service.ProvisionAsync(NewProvisionRequest(authHash));
         return (result.TenantId, result.AdminUserId);
+    }
+
+    private async Task SuspendTenantAsync(Guid tenantId)
+    {
+        using var ctx = CreateContext(SuperAdmin());
+        var tenant = await ctx.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Id == tenantId);
+        tenant.Status = TenantStatus.Suspended;
+        await ctx.SaveChangesAsync();
     }
 
     private async Task EnableMfaAsync(Guid tenantId, Guid userId, byte[] secret)

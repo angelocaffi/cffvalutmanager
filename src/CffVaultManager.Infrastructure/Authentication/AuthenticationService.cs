@@ -118,6 +118,11 @@ internal sealed class AuthenticationService : IAuthenticationService
             return LoginResult.Failure("Invalid refresh token.");
         }
 
+        if (await IsTenantSuspendedAsync(user.TenantId, ct))
+        {
+            return LoginResult.Failure("Tenant is suspended.");
+        }
+
         string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime);
         var materials = new CryptoMaterials(
             user.EncryptedDek,
@@ -131,6 +136,11 @@ internal sealed class AuthenticationService : IAuthenticationService
 
     private async Task<LoginResult> IssueSessionAsync(User user, string? ip, string? userAgent, CancellationToken ct)
     {
+        if (await IsTenantSuspendedAsync(user.TenantId, ct))
+        {
+            return LoginResult.Failure("Tenant is suspended.");
+        }
+
         string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime);
         var refresh = await _refreshTokens.IssueAsync(user.Id, ip, userAgent, ct);
 
@@ -145,6 +155,22 @@ internal sealed class AuthenticationService : IAuthenticationService
             user.KdfVersion);
 
         return LoginResult.Authenticated(access, refresh.PlainToken, materials);
+    }
+
+    // SuperAdmin (TenantId == null) is never subject to tenant suspension.
+    private async Task<bool> IsTenantSuspendedAsync(Guid? tenantId, CancellationToken ct)
+    {
+        if (tenantId is null)
+        {
+            return false;
+        }
+
+        var status = await _db.Tenants.IgnoreQueryFilters()
+            .Where(t => t.Id == tenantId)
+            .Select(t => (TenantStatus?)t.Status)
+            .FirstOrDefaultAsync(ct);
+
+        return status == TenantStatus.Suspended;
     }
 
     private async Task WriteAuditAsync(User user, AuditAction action, string? ip, string? userAgent, CancellationToken ct)

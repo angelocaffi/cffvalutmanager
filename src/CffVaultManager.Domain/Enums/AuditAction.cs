@@ -18,5 +18,6 @@ public enum AuditAction
     EmailOtpFailed,
     TenantProvisioned,
     TenantSuspended,
+    TenantReactivated,
     UserRoleChanged,
 }
