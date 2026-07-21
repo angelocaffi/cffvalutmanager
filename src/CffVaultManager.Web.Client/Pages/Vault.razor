@@ -1,35 +1,34 @@
 @page "/vault"
 @attribute [Authorize]
 @inject VaultApiClient VaultApi
-@inject SessionState Session
-@inject NavigationManager Navigation
 
 <PageTitle>Vault</PageTitle>
 
-<div class="vault-page">
-    <div class="vault-header">
-        <h1>Vault</h1>
-        <button type="button" @onclick="Lock">Blocca</button>
-    </div>
+<h1 class="h3 mb-4">I tuoi vault</h1>
 
-    @if (_vaults is null)
-    {
-        <p>Caricamento…</p>
-    }
-    else if (_vaults.Count == 0)
-    {
-        <p>Nessun vault trovato.</p>
-    }
-    else
-    {
-        <ul>
-            @foreach (var vault in _vaults)
-            {
-                <li>@vault.Name @(vault.IsOrganizationVault ? "(organizzazione)" : "(personale)")</li>
-            }
-        </ul>
-    }
-</div>
+@if (_vaults is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_vaults.Count == 0)
+{
+    <p class="text-body-secondary">Nessun vault trovato.</p>
+}
+else
+{
+    <div class="list-group" style="max-width: 32rem;">
+        @foreach (var vault in _vaults)
+        {
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span>@vault.Name</span>
+                <span class="badge text-bg-secondary">@(vault.IsOrganizationVault ? "Organizzazione" : "Personale")</span>
+            </div>
+        }
+    </div>
+}
 
 @code {
     private IReadOnlyList<VaultResponse>? _vaults;
@@ -37,11 +36,5 @@
     protected override async Task OnInitializedAsync()
     {
         _vaults = await VaultApi.ListVaultsAsync();
-    }
-
-    private void Lock()
-    {
-        Session.Clear();
-        Navigation.NavigateTo("/login");
     }
 }

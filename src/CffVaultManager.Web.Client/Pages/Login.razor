@@ -11,47 +11,68 @@
 
 <PageTitle>Accedi</PageTitle>
 
-<div class="login-card">
-    <h1>CffVaultManager</h1>
+<div class="login-shell d-flex justify-content-center">
+    <div class="card shadow-sm login-card">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="login-logo mb-2" />
+                <h1 class="h4 mb-0 text-primary">Accedi al tuo vault</h1>
+            </div>
 
-    @if (_stage == Stage.Credentials)
-    {
-        <form @onsubmit="HandleCredentialsSubmitAsync" @onsubmit:preventDefault="true">
-            <label>
-                Email
-                <input type="email" @bind="_email" @bind:event="oninput" required disabled="@_busy" autocomplete="username" />
-            </label>
-            <label>
-                Master password
-                <input type="password" @bind="_masterPassword" @bind:event="oninput" required disabled="@_busy" autocomplete="current-password" />
-            </label>
-
-            @if (_errorMessage is not null)
+            @if (_stage == Stage.Credentials)
             {
-                <p class="login-error" role="alert">@_errorMessage</p>
+                <form @onsubmit="HandleCredentialsSubmitAsync" @onsubmit:preventDefault="true">
+                    <div class="mb-3">
+                        <label for="login-email" class="form-label">Email</label>
+                        <input id="login-email" type="email" class="form-control" @bind="_email" @bind:event="oninput"
+                               required disabled="@_busy" autocomplete="username" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="login-password" class="form-label">Master password</label>
+                        <input id="login-password" type="password" class="form-control" @bind="_masterPassword" @bind:event="oninput"
+                               required disabled="@_busy" autocomplete="current-password" />
+                    </div>
+
+                    @if (_errorMessage is not null)
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                    }
+
+                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        @(_busy ? "Accesso in corso…" : "Accedi")
+                    </button>
+                </form>
             }
-
-            <button type="submit" disabled="@_busy">@(_busy ? "Accesso in corso…" : "Accedi")</button>
-        </form>
-    }
-    else
-    {
-        <form @onsubmit="HandleMfaSubmitAsync" @onsubmit:preventDefault="true">
-            <p>Inserisci il codice a 6 cifre della tua app di autenticazione.</p>
-            <label>
-                Codice
-                <input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
-                       @bind="_mfaCode" @bind:event="oninput" required disabled="@_busy" />
-            </label>
-
-            @if (_errorMessage is not null)
+            else
             {
-                <p class="login-error" role="alert">@_errorMessage</p>
-            }
+                <form @onsubmit="HandleMfaSubmitAsync" @onsubmit:preventDefault="true">
+                    <p class="text-body-secondary small">Inserisci il codice a 6 cifre della tua app di autenticazione.</p>
+                    <div class="mb-3">
+                        <label for="login-mfa-code" class="form-label">Codice</label>
+                        <input id="login-mfa-code" type="text" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                               @bind="_mfaCode" @bind:event="oninput" required disabled="@_busy" />
+                    </div>
 
-            <button type="submit" disabled="@_busy">@(_busy ? "Verifica in corso…" : "Verifica")</button>
-        </form>
-    }
+                    @if (_errorMessage is not null)
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                    }
+
+                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        @(_busy ? "Verifica in corso…" : "Verifica")
+                    </button>
+                </form>
+            }
+        </div>
+    </div>
 </div>
 
 @code {

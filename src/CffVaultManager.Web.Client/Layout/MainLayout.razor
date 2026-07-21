@@ -1,13 +1,38 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@inject SessionState Session
+@inject NavigationManager Navigation
 
-<header class="app-header">
-    <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="app-logo" />
-</header>
+<nav class="navbar navbar-expand navbar-dark app-navbar">
+    <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+            <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="app-logo" />
+            <span>CffVaultManager</span>
+        </a>
 
-@Body
+        @if (Session.IsUnlocked)
+        {
+            <div class="d-flex align-items-center gap-3">
+                <span class="text-white-50 small d-none d-sm-inline">@Session.Email</span>
+                <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
+            </div>
+        }
+    </div>
+</nav>
+
+<main class="container-fluid py-4">
+    @Body
+</main>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
+    Si è verificato un errore imprevisto.
+    <a href="." class="reload">Ricarica</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private void Lock()
+    {
+        Session.Clear();
+        Navigation.NavigateTo("/login");
+    }
+}

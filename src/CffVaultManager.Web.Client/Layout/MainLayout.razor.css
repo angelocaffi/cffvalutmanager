@@ -1,11 +1,9 @@
-.app-header {
-    padding: 0.5rem 1rem;
-    display: flex;
-    align-items: center;
+.app-navbar {
+    background-color: var(--brand-navy);
 }
 
 .app-logo {
-    height: 40px;
+    height: 32px;
     width: auto;
 }
 

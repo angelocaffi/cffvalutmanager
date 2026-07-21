@@ -1,0 +1,76 @@
+/*
+ * CffVaultManager base theme — Bootstrap 5 variable overrides.
+ * Palette sampled directly from CffVaultmanager.svg (shield gradient + keyhole + wordmark),
+ * not a generic guess: brand-navy/brand-teal come from the shield's two gradient ends, and
+ * brand-cyan from the keyhole highlight. Loaded after lib/bootstrap/css/bootstrap.min.css.
+ *
+ * Signature: brand-cyan (the keyhole color) is reserved for the "unlock" moment only — the
+ * login/MFA submit buttons and focus rings — everything else stays navy/teal/neutral so that
+ * one accent keeps its meaning instead of being decoration.
+ */
+
+:root,
+[data-bs-theme="light"] {
+    --brand-navy: #0e4a78;
+    --brand-navy-rgb: 14, 74, 120;
+    --brand-teal: #157a93;
+    --brand-teal-rgb: 21, 122, 147;
+    --brand-cyan: #00d9ec;
+    --brand-cyan-rgb: 0, 217, 236;
+    --brand-ink: #12202b;
+    --brand-bg: #f4f7f8;
+
+    --bs-font-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+
+    --bs-body-bg: var(--brand-bg);
+    --bs-body-color: var(--brand-ink);
+
+    --bs-primary: var(--brand-navy);
+    --bs-primary-rgb: var(--brand-navy-rgb);
+    --bs-primary-text-emphasis: var(--brand-navy);
+    --bs-primary-bg-subtle: #dbe9f2;
+    --bs-primary-border-subtle: #b3d0e2;
+
+    --bs-secondary: var(--brand-teal);
+    --bs-secondary-rgb: var(--brand-teal-rgb);
+    --bs-secondary-text-emphasis: var(--brand-teal);
+    --bs-secondary-bg-subtle: #dcedf1;
+    --bs-secondary-border-subtle: #b7d8e0;
+
+    /* "info" carries the keyhole accent — the one reserved unlock color, used via .btn-info etc. */
+    --bs-info: var(--brand-cyan);
+    --bs-info-rgb: var(--brand-cyan-rgb);
+    --bs-info-text-emphasis: #006b78;
+    --bs-info-bg-subtle: #cff8fc;
+    --bs-info-border-subtle: #7ceaf3;
+
+    --bs-link-color: var(--brand-teal);
+    --bs-link-color-rgb: var(--brand-teal-rgb);
+    --bs-link-hover-color: var(--brand-navy);
+    --bs-link-hover-color-rgb: var(--brand-navy-rgb);
+
+    --bs-border-radius: 0.5rem;
+    --bs-border-radius-sm: 0.375rem;
+    --bs-border-radius-lg: 0.75rem;
+}
+
+/* .btn-info's default Bootstrap text color is dark-on-cyan already (good contrast); just make
+   sure the unlock button reads as the primary action visually (bold weight) without becoming a
+   second "primary" color used everywhere. */
+.btn-info {
+    font-weight: 600;
+    color: var(--brand-ink);
+}
+
+.navbar-brand img {
+    height: 2rem;
+    width: auto;
+}
+
+/* Keyhole-colored focus ring, used sparingly (form controls only) so the accent stays tied to
+   "this is where you unlock/authenticate", not a blanket restyle of every focus state. */
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--brand-cyan);
+    box-shadow: 0 0 0 0.25rem rgba(var(--brand-cyan-rgb), 0.25);
+}
