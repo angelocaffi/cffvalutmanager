@@ -26,6 +26,8 @@ Entità principali (nomi indicativi, da raffinare in fase di implementazione). T
 | EncryptedDek | DEK cifrata con la KEK derivata dalla master password |
 | MfaEnabled / MfaSecret | secret TOTP **[cifrato]** |
 | MfaEmailOtpEnabled | bool — abilita l'Email OTP come fattore MFA aggiuntivo/alternativo al TOTP (vedi [features/authentication.md](features/authentication.md)) |
+| FailedLoginAttempts | contatore tentativi falliti consecutivi (password o codice MFA errati), azzerato su successo o su lockout |
+| LockedUntil | nullable — finché è nel futuro, il login è rifiutato a prescindere dalle credenziali (vedi [features/authentication.md](features/authentication.md) rate limiting) |
 | PublicKey | nullable — chiave pubblica X25519 (32 byte), in chiaro per definizione; usata per condividere DEK di vault di organizzazione (vedi [features/sharing-access-control.md](features/sharing-access-control.md)) |
 | EncryptedPrivateKey | nullable **[cifrato]** — chiave privata X25519 cifrata con la propria DEK (non una KEK separata), come qualunque altro secret dell'utente |
 | CreatedAt / LastLoginAt | |
@@ -129,7 +131,7 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 

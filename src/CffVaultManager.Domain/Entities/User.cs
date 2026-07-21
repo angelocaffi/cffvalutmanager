@@ -157,6 +157,12 @@ public class User
 
     public DateTimeOffset? LastLoginAt { get; set; }
 
+    /// <summary>Consecutive failed login attempts since the last success or the last lockout. Reset to 0 on either.</summary>
+    public int FailedLoginAttempts { get; set; }
+
+    /// <summary>While in the future, login is rejected outright regardless of credentials (see docs/features/authentication.md rate limiting).</summary>
+    public DateTimeOffset? LockedUntil { get; set; }
+
     /// <summary>
     /// The user's long-term X25519 public key for organization-vault sharing. Null until the
     /// user's client generates a keypair (lazily on first login after this feature ships, or at

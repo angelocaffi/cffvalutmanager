@@ -17,6 +17,13 @@ internal sealed class AuthenticationService : IAuthenticationService
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan MfaChallengeLifetime = TimeSpan.FromMinutes(5);
 
+    // Shared between wrong-password and wrong-MFA-code attempts: both represent the same "this
+    // account is under attack" signal (see docs/features/authentication.md rate limiting). The
+    // lockout window is fixed from the triggering attempt, not extended by further attempts made
+    // while already locked out.
+    private const int MaxFailedLoginAttempts = 5;
+    private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+
     private readonly CffVaultManagerDbContext _db;
     private readonly IAuthHashHasher _authHashHasher;
     private readonly IJwtTokenService _jwt;
@@ -48,17 +55,28 @@ internal sealed class AuthenticationService : IAuthenticationService
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Email == email, ct);
 
-        if (user is null || user.MasterPasswordHash is null || !_authHashHasher.Verify(authHash, user.MasterPasswordHash))
+        if (user is null)
         {
-            // Only attributable failures (known user) are audited; a missing email leaves no trace
-            // to avoid confirming which addresses exist.
-            if (user is not null)
-            {
-                await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
-            }
-
+            // Unknown email leaves no trace at all, to avoid confirming which addresses exist.
             return LoginResult.Failure();
         }
+
+        if (IsLockedOut(user))
+        {
+            // Rejected without even checking the password: the account is under a fixed lockout
+            // window from an earlier trigger, not extended by further attempts (see docs/features/
+            // authentication.md). Still audited so the attempt is visible.
+            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
+        if (user.MasterPasswordHash is null || !_authHashHasher.Verify(authHash, user.MasterPasswordHash))
+        {
+            await RegisterFailedAttemptAsync(user, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
+        ResetLockoutState(user);
 
         if (user.MfaEnabled)
         {
@@ -87,14 +105,24 @@ internal sealed class AuthenticationService : IAuthenticationService
             return LoginResult.Failure();
         }
 
+        if (IsLockedOut(user))
+        {
+            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
         byte[] secret = _secretProtector.Unprotect(user.MfaSecret);
         if (!_totp.ValidateCode(secret, totpCode))
         {
             // No dedicated "MfaFailed" audit action exists; LoginFailed is reused for a failed
-            // second factor to avoid introducing new enum values in this round.
-            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            // second factor to avoid introducing new enum values in this round. A wrong TOTP code
+            // counts toward the same lockout as a wrong password — the attacker already cleared the
+            // password check to get here, and a 6-digit code is brute-forceable without this.
+            await RegisterFailedAttemptAsync(user, ip, userAgent, ct);
             return LoginResult.Failure();
         }
+
+        ResetLockoutState(user);
 
         return await IssueSessionAsync(user, ip, userAgent, ct);
     }
@@ -155,6 +183,30 @@ internal sealed class AuthenticationService : IAuthenticationService
             user.KdfVersion);
 
         return LoginResult.Authenticated(access, refresh.PlainToken, materials);
+    }
+
+    private static bool IsLockedOut(User user) => user.LockedUntil is not null && user.LockedUntil > DateTimeOffset.UtcNow;
+
+    private static void ResetLockoutState(User user)
+    {
+        user.FailedLoginAttempts = 0;
+        user.LockedUntil = null;
+    }
+
+    private async Task RegisterFailedAttemptAsync(User user, string? ip, string? userAgent, CancellationToken ct)
+    {
+        user.FailedLoginAttempts++;
+
+        if (user.FailedLoginAttempts >= MaxFailedLoginAttempts)
+        {
+            user.FailedLoginAttempts = 0;
+            user.LockedUntil = DateTimeOffset.UtcNow.Add(LockoutDuration);
+            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            await WriteAuditAsync(user, AuditAction.AccountLocked, ip, userAgent, ct);
+            return;
+        }
+
+        await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
     }
 
     // SuperAdmin (TenantId == null) is never subject to tenant suspension.

@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using CffVaultManager.Api.Authentication;
 using CffVaultManager.Api.Endpoints;
 using CffVaultManager.Infrastructure.DependencyInjection;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +23,25 @@ builder.Services
     .AddScheme<AuthenticationSchemeOptions, BearerTokenAuthenticationHandler>(BearerTokenAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization();
 
+// Per-IP fixed-window limiter on the unauthenticated auth endpoints (login/mfa-verify/refresh),
+// which are otherwise brute-forceable by an anonymous caller regardless of per-account lockout
+// (see AuthenticationService's FailedLoginAttempts/LockedUntil) — see docs/features/
+// authentication.md "Rate limiting su tentativi di login". No queueing: an attacker gains nothing
+// from being queued, and a legitimate user's next real attempt should just be rejected outright,
+// not delayed.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(AuthRateLimiting.PolicyName, httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+});
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -30,6 +51,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseMiddleware<TenantResolutionMiddleware>();

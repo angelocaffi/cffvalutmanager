@@ -64,4 +64,11 @@ Flusso distinto dall'MFA (attiva l'account, non protegge un login già autentica
 
 ## Stato
 
-Da pianificare — dipende dalla decisione Blazor Server vs WASM in [../architecture.md](../architecture.md).
+Login (con risoluzione tenant), MFA TOTP e ora rate limiting/lockout sono implementati ed esposti su `/api/auth/*`. Decisione Blazor WASM confermata ([../architecture.md](../architecture.md)).
+
+**Rate limiting su tentativi di login** — due livelli indipendenti, entrambi necessari (proteggono minacce diverse):
+
+- **Lockout per account**: `User.FailedLoginAttempts`/`LockedUntil`. Dopo 5 tentativi consecutivi falliti (password o codice MFA errati — condividono lo stesso contatore, perché entrambi indicano un attacco in corso contro lo stesso account) l'account viene bloccato per 15 minuti a finestra fissa (non estesa da ulteriori tentativi durante il blocco). Il contatore si azzera su login riuscito. Un tentativo con codice MFA errato conta quanto uno con password errata: un attaccante che ha già superato il controllo password sta comunque provando a indovinare un codice a 6 cifre, banale da forzare senza questo limite.
+- **Rate limiting per IP**: limiter a finestra fissa (`Microsoft.AspNetCore.RateLimiting`, nessun pacchetto esterno) su `/api/auth/login`, `/api/auth/mfa/verify`, `/api/auth/refresh` — 10 richieste al minuto per IP, nessuna coda (l'attaccante non guadagna nulla dall'essere messo in coda). Protegge l'endpoint da un singolo chiamante che prova email diverse, scenario che il lockout per-account da solo non copre.
+
+8 nuovi test (6 lockout in `AuthenticationTests`, 2 rate limiting in `RateLimitingTests`; 281 in totale nella solution). Manca ancora: verifica email in registrazione, cambio master password, logout remoto/invalidazione sessioni (vedi roadmap Fase 2), Email OTP come fattore MFA (Fase 3).

@@ -14,7 +14,7 @@
 ## Fase 1 — MVP
 
 - [x] Provisioning tenant: creazione organizzazione + primo Admin, esposto su `POST /api/tenants` ([multi-tenancy.md](multi-tenancy.md#provisioning-di-un-nuovo-tenant))
-- [~] Autenticazione: login (con risoluzione tenant), MFA TOTP esposti su `/api/auth/*` ([features/authentication.md](features/authentication.md)) — l'MVP resta con **solo TOTP** come baseline MFA; l'Email OTP è rimandato alla Fase 3. Manca ancora: verifica email in registrazione, cambio master password, logout remoto/invalidazione sessioni, rate limiting sui tentativi (previsto in Fase 2)
+- [~] Autenticazione: login (con risoluzione tenant), MFA TOTP esposti su `/api/auth/*` ([features/authentication.md](features/authentication.md)) — l'MVP resta con **solo TOTP** come baseline MFA; l'Email OTP è rimandato alla Fase 3. Rate limiting/lockout sui tentativi ora implementati (vedi Fase 2). Manca ancora: verifica email in registrazione, cambio master password, logout remoto/invalidazione sessioni (Fase 2)
 - [x] Vault core: vault personali, cartelle, tag, filtri/ordinamento, cestino con soft-delete ed eliminazione fisica esplicita ([features/vault-core.md](features/vault-core.md)) — ricerca full-text resta client-side dopo decifratura, come da design; vault di organizzazione non ancora implementati (proprietà `OwnerUserId` è l'unico controllo di accesso sui vault personali)
 - [~] Gestione password: CRUD + generatore ([features/password-manager.md](features/password-manager.md)) — CRUD lato server già coperto genericamente da `VaultItem`/`Type=Password` (vault-core); generatore password/passphrase client-side implementato in `CffVaultManager.Crypto.PasswordGeneratorService` (RNG crittografico, no `Random`, 56 test). Manca ancora: le pagine Blazor (`Web.Client`) per creare/vedere/modificare le voci password, cifratura/decifratura lato client del payload, indicatore di forza, cronologia password nel payload cifrato
 - [~] Gestione carte di credito: CRUD + mascheramento ([features/credit-cards.md](features/credit-cards.md)) — CRUD lato server già coperto genericamente da `VaultItem`/`Type=CreditCard` (vault-core); validazione Luhn, riconoscimento circuito da prefisso e mascheramento numero implementati client-side in `CffVaultManager.Crypto.CardValidationService` (29 test). Manca ancora: le pagine Blazor (`Web.Client`) per creare/vedere/modificare le voci carta, cifratura/decifratura lato client del payload, conferma esplicita per il reveal di numero/CVV, alert di scadenza (rimandato — collegato a notifications.md, v2)
@@ -26,7 +26,7 @@
 
 ## Fase 2 — Hardening e qualità
 
-- [ ] Rate limiting e lockout su login
+- [x] Rate limiting e lockout su login ([features/authentication.md](features/authentication.md)) — due livelli: lockout per account (`User.FailedLoginAttempts`/`LockedUntil`, 5 tentativi falliti consecutivi → 15 minuti di blocco a finestra fissa, condiviso tra password e codice MFA errati) e rate limiting per IP (`Microsoft.AspNetCore.RateLimiting`, 10 richieste/minuto su login/mfa-verify/refresh, nessuna coda). 8 nuovi test (6 Infrastructure + 2 Api; 281 in totale nella solution)
 - [ ] Logout remoto / gestione sessioni attive
 - [ ] Review di sicurezza completa contro la checklist in [security-model.md](security-model.md)
 - [ ] Test di integrazione end-to-end su flussi critici (login, cifratura/decifratura, cambio master password)

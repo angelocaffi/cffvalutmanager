@@ -145,6 +145,140 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task Login_after_five_wrong_attempts_locks_the_account()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        for (int i = 0; i < 5; i++)
+        {
+            var attempt = await auth.LoginAsync("admin@x.com", RandomAuthHash(), null, null);
+            Assert.False(attempt.Success);
+        }
+
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Email == "admin@x.com");
+        Assert.NotNull(user.LockedUntil);
+        Assert.True(user.LockedUntil > DateTimeOffset.UtcNow);
+        Assert.Equal(0, user.FailedLoginAttempts);
+
+        Assert.Equal(1, await ctx.AuditLogEntries.IgnoreQueryFilters().CountAsync(a => a.Action == AuditAction.AccountLocked));
+    }
+
+    [Fact]
+    public async Task Login_while_locked_fails_even_with_the_correct_password()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        for (int i = 0; i < 5; i++)
+        {
+            await auth.LoginAsync("admin@x.com", RandomAuthHash(), null, null);
+        }
+
+        // Correct credentials, but the account is locked — must still fail.
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AccessToken);
+    }
+
+    [Fact]
+    public async Task Login_after_lockout_expires_succeeds_with_correct_password()
+    {
+        var authHash = RandomAuthHash();
+        var (_, adminId) = await ProvisionAsync(authHash);
+
+        using (var ctx = CreateContext(SuperAdmin()))
+        {
+            var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+            user.LockedUntil = DateTimeOffset.UtcNow.AddMinutes(-1); // already expired
+            await ctx.SaveChangesAsync();
+        }
+
+        using var verifyCtx = CreateContext(Unresolved());
+        var auth = CreateAuthService(verifyCtx);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
+    }
+
+    [Fact]
+    public async Task Login_success_resets_the_failed_attempt_counter()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        await auth.LoginAsync("admin@x.com", RandomAuthHash(), null, null);
+        await auth.LoginAsync("admin@x.com", RandomAuthHash(), null, null);
+
+        var result = await auth.LoginAsync("admin@x.com", authHash, null, null);
+        Assert.True(result.Success);
+
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Email == "admin@x.com");
+        Assert.Equal(0, user.FailedLoginAttempts);
+        Assert.Null(user.LockedUntil);
+    }
+
+    [Fact]
+    public async Task VerifyMfa_after_five_wrong_codes_locks_the_account()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var secret = _totp.GenerateSecret();
+        await EnableMfaAsync(tenantId, adminId, secret);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+
+        for (int i = 0; i < 5; i++)
+        {
+            await auth.VerifyMfaAsync(challenge, "000000", null, null);
+        }
+
+        var user = await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.NotNull(user.LockedUntil);
+        Assert.True(user.LockedUntil > DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
+    public async Task VerifyMfa_while_locked_fails_even_with_the_correct_code()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var secret = _totp.GenerateSecret();
+        await EnableMfaAsync(tenantId, adminId, secret);
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var challenge = (await auth.LoginAsync("admin@x.com", authHash, null, null)).MfaChallengeToken!;
+
+        for (int i = 0; i < 5; i++)
+        {
+            await auth.VerifyMfaAsync(challenge, "000000", null, null);
+        }
+
+        var code = new OtpNet.Totp(secret).ComputeTotp();
+        var result = await auth.VerifyMfaAsync(challenge, code, null, null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AccessToken);
+    }
+
+    [Fact]
     public async Task Login_with_unknown_email_fails_without_audit()
     {
         using var ctx = CreateContext(Unresolved());

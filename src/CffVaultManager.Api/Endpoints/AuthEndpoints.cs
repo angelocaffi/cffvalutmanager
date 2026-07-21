@@ -1,7 +1,14 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace CffVaultManager.Api.Endpoints;
+
+/// <summary>Name of the per-IP rate-limiting policy applied to the unauthenticated auth endpoints (see Program.cs).</summary>
+internal static class AuthRateLimiting
+{
+    public const string PolicyName = "auth";
+}
 
 internal static class AuthEndpoints
 {
@@ -20,19 +27,19 @@ internal static class AuthEndpoints
         {
             var result = await auth.LoginAsync(request.Email, request.AuthHash, ClientIp(http), UserAgent(http), ct);
             return result.Success || result.RequiresMfa ? Results.Ok(result) : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
-        });
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
         app.MapPost("/api/auth/mfa/verify", async (VerifyMfaRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
             var result = await auth.VerifyMfaAsync(request.ChallengeToken, request.Code, ClientIp(http), UserAgent(http), ct);
             return result.Success ? Results.Ok(result) : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
-        });
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
         app.MapPost("/api/auth/refresh", async (RefreshRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
             var result = await auth.RefreshAsync(request.RefreshToken, ClientIp(http), UserAgent(http), ct);
             return result.Success ? Results.Ok(result) : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
-        });
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
         app.MapPost("/api/auth/mfa/setup", async (IMfaSetupService service, ITenantContext tenantContext, CancellationToken ct) =>
         {
