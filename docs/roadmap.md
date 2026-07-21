@@ -36,7 +36,7 @@
 - [ ] Password health / dashboard sicurezza ([features/password-health.md](features/password-health.md))
 - [ ] Import / export ([features/import-export.md](features/import-export.md))
 - [ ] Notifiche (scadenza carte, alert sicurezza) ([features/notifications.md](features/notifications.md))
-- [ ] WebAuthn/Passkey come alternativa a TOTP
+- [ ] WebAuthn/Passkey come alternativa a TOTP (autenticazione biometrica — Windows Hello/Touch ID/Face ID/sblocco Android — vedi [features/authentication.md](features/authentication.md)). Il vincolo di design ("riservare posto nella UI di login per l'opzione biometrica, fallback trasparente se non disponibile") va rispettato già alla prima stesura della schermata di login in `Web.Client` (Fase 1), anche se l'implementazione server-side resta qui in Fase 3
 - [ ] Email OTP come fattore MFA aggiuntivo/alternativo al TOTP (inclusa verifica email in registrazione) ([features/authentication.md](features/authentication.md))
 
 ## Fase 4 — Estensioni condivisione

@@ -15,7 +15,7 @@ Garantire che solo il legittimo proprietario di un vault possa sbloccarlo, senza
   - Fattori supportati:
     - **TOTP** (RFC 6238, Google Authenticator/Authy compatibile) — baseline, fattore consigliato.
     - **Email OTP** (codice one-time inviato via email) — fattore aggiuntivo o alternativo al TOTP, **non sostitutivo**. Strutturalmente più debole del TOTP perché il canale email non è sotto controllo esclusivo dell'app/utente (vedi Requisiti di sicurezza).
-    - **WebAuthn/Passkey** — opzione avanzata (v2).
+    - **WebAuthn/Passkey (autenticazione biometrica)** — Windows Hello, Touch ID/Face ID, sblocco biometrico Android: qualunque platform authenticator il browser/dispositivo espone via WebAuthn. **Requisito esplicito per il frontend Blazor Web.Client, da non dimenticare quando si costruisce la schermata di login**: il form di accesso deve riservare fin dal primo disegno UI un pulsante/opzione "Accedi con biometria" quando `navigator.credentials` + un platform authenticator sono disponibili (rilevabile via `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()`), con fallback silenzioso e trasparente a master password + TOTP sui device che non la supportano — mai un vicolo cieco se la biometria non è disponibile. Non ancora implementato lato server (serve una nuova entità per le credenziali WebAuthn registrate, analoga a `MfaSecret`) — vedi "Stato" sotto.
   - Un utente può registrare uno o più fattori. Quando ne ha più di uno, **sceglie quale fattore usare al login**; è possibile impostare un fattore predefinito configurabile dall'utente (usato automaticamente salvo scelta esplicita di un altro).
   - MFA richiesta al login, non solo alla registrazione.
   - **Vincolo zero-knowledge**: nessun fattore MFA — in particolare l'Email OTP — sostituisce mai la master password né bypassa il flusso di login. La master password è l'unico input che deriva la KEK lato client; un OTP via email **non produce alcuna chiave crittografica** e viene sempre verificato *in aggiunta* all'inserimento della master password, mai al suo posto. Non è previsto alcun login "passwordless" via Email OTP.
@@ -61,6 +61,7 @@ Flusso distinto dall'MFA (attiva l'account, non protegge un login già autentica
 - Timer visibile o notifica prima dell'auto-lock.
 - Per i codici one-time (Email OTP e verifica email): campo dedicato all'inserimento del codice, **countdown di scadenza** visibile e pulsante di **reinvio con cooldown** mostrato (il pulsante resta disabilitato finché il cooldown non è trascorso).
 - Se l'utente ha più fattori MFA registrati, selettore del fattore al login con l'Email OTP etichettato come opzione "meno sicura" rispetto al TOTP.
+- **Biometria**: se il device/browser espone un platform authenticator, un pulsante "Accedi con biometria" ben visibile accanto (non al posto di) al form master password + TOTP, con icona coerente col tipo di sensore quando rilevabile (impronta/volto/generico). Nessun messaggio di errore bloccante se la biometria non è disponibile o l'utente la annulla — semplice ritorno al flusso standard.
 
 ## Stato
 
@@ -75,4 +76,4 @@ Login (con risoluzione tenant), MFA TOTP e ora rate limiting/lockout sono implem
 
 **Logout remoto** — `IRefreshTokenService` espone `ListActiveSessionsAsync`/`RevokeSessionAsync`/`RevokeAllSessionsAsync`, su `GET/POST /api/auth/sessions*`. Ogni riga `RefreshToken` attiva (non revocata, non scaduta) rappresenta una sessione/dispositivo distinto; la revoca (singola o totale) impedisce il rinnovo futuro tramite `/refresh`, ma **non invalida un access token JWT già emesso** — essendo stateless, un JWT non può essere revocato singolarmente senza una blocklist server-side dedicata (fuori scope v1); la finestra residua è comunque limitata ai 15 minuti di vita dell'access token, stessa scelta accettata già fatta per la sospensione tenant. Azione tracciata con `AuditAction.SessionsRevoked`. 12 nuovi test (7 Infrastructure + 5 Api).
 
-Totale: 293 test nella solution. Manca ancora: verifica email in registrazione, cambio master password (Fase 2), Email OTP come fattore MFA (Fase 3).
+Totale: 293 test nella solution. Manca ancora: verifica email in registrazione, cambio master password (Fase 2), Email OTP come fattore MFA (Fase 3), WebAuthn/Passkey biometrico (Fase 3 lato server; il vincolo di design UI — riservare posto per l'opzione biometrica nella schermata di login — vale invece da subito, non aspettare la Fase 3, per non doverla reinserire forzatamente in un'interfaccia già disegnata senza pensarci).

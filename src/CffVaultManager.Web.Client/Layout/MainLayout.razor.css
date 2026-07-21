@@ -1,3 +1,14 @@
+.app-header {
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+}
+
+.app-logo {
+    height: 40px;
+    width: auto;
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;
