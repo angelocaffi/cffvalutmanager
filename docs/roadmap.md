@@ -27,7 +27,7 @@
 ## Fase 2 — Hardening e qualità
 
 - [x] Rate limiting e lockout su login ([features/authentication.md](features/authentication.md)) — due livelli: lockout per account (`User.FailedLoginAttempts`/`LockedUntil`, 5 tentativi falliti consecutivi → 15 minuti di blocco a finestra fissa, condiviso tra password e codice MFA errati) e rate limiting per IP (`Microsoft.AspNetCore.RateLimiting`, 10 richieste/minuto su login/mfa-verify/refresh, nessuna coda). 8 nuovi test (6 Infrastructure + 2 Api; 281 in totale nella solution)
-- [ ] Logout remoto / gestione sessioni attive
+- [x] Logout remoto / gestione sessioni attive ([features/authentication.md](features/authentication.md)) — `GET /api/auth/sessions` (elenco sessioni attive, una per `RefreshToken` non revocato/non scaduto), `POST .../sessions/{id}/revoke`, `POST .../sessions/revoke-all` (`AuditAction.SessionsRevoked`). Limite accettato: un access token JWT già emesso resta valido fino alla sua scadenza naturale (15 min) — nessuna blocklist server-side per revoca puntuale di JWT stateless, stessa scelta già fatta per la sospensione tenant. 12 nuovi test (7 Infrastructure + 5 Api; 293 in totale nella solution)
 - [ ] Review di sicurezza completa contro la checklist in [security-model.md](security-model.md)
 - [ ] Test di integrazione end-to-end su flussi critici (login, cifratura/decifratura, cambio master password)
 

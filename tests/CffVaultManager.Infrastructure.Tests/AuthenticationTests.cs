@@ -513,6 +513,124 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task ListActiveSessionsAsync_returns_only_active_sessions_newest_first()
+    {
+        var (_, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var first = await service.IssueAsync(adminId, "1.1.1.1", "agent-1");
+        var second = await service.IssueAsync(adminId, "2.2.2.2", "agent-2");
+        var revoked = await service.IssueAsync(adminId, "3.3.3.3", "agent-3");
+        await service.RevokeSessionAsync(adminId, null, revoked.Entity.Id);
+
+        var sessions = await service.ListActiveSessionsAsync(adminId);
+
+        Assert.Equal(2, sessions.Count);
+        Assert.DoesNotContain(sessions, s => s.Id == revoked.Entity.Id);
+        Assert.Contains(sessions, s => s.Id == first.Entity.Id && s.CreatedByIp == "1.1.1.1");
+        Assert.Contains(sessions, s => s.Id == second.Entity.Id && s.CreatedByIp == "2.2.2.2");
+    }
+
+    [Fact]
+    public async Task RevokeSessionAsync_prevents_the_session_from_being_refreshed_again()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var issued = await service.IssueAsync(adminId, null, null);
+        await service.RevokeSessionAsync(adminId, tenantId, issued.Entity.Id);
+
+        var rotated = await service.ValidateAndRotateAsync(issued.PlainToken, null, null);
+        Assert.Null(rotated);
+    }
+
+    [Fact]
+    public async Task RevokeSessionAsync_writes_a_SessionsRevoked_audit_entry()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var issued = await service.IssueAsync(adminId, null, null);
+        await service.RevokeSessionAsync(adminId, tenantId, issued.Entity.Id);
+
+        Assert.True(await ctx.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.SessionsRevoked));
+    }
+
+    [Fact]
+    public async Task RevokeSessionAsync_for_a_session_owned_by_another_user_throws_KeyNotFoundException()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var operatorId = await RegisterOperatorAsync(tenantId, adminId);
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var adminSession = await service.IssueAsync(adminId, null, null);
+
+        // operatorId does not own adminSession — must not be able to revoke it.
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.RevokeSessionAsync(operatorId, tenantId, adminSession.Entity.Id));
+    }
+
+    [Fact]
+    public async Task RevokeSessionAsync_for_a_nonexistent_session_throws_KeyNotFoundException()
+    {
+        var (_, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.RevokeSessionAsync(adminId, null, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task RevokeSessionAsync_is_idempotent_for_an_already_revoked_session()
+    {
+        var (tenantId, adminId) = await ProvisionAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var issued = await service.IssueAsync(adminId, null, null);
+        await service.RevokeSessionAsync(adminId, tenantId, issued.Entity.Id);
+
+        // Revoking again must not throw.
+        await service.RevokeSessionAsync(adminId, tenantId, issued.Entity.Id);
+    }
+
+    [Fact]
+    public async Task RevokeAllSessionsAsync_revokes_every_active_session_but_not_another_users()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var operatorId = await RegisterOperatorAsync(tenantId, adminId);
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new RefreshTokenService(ctx);
+
+        var adminSession1 = await service.IssueAsync(adminId, null, null);
+        var adminSession2 = await service.IssueAsync(adminId, null, null);
+        var operatorSession = await service.IssueAsync(operatorId, null, null);
+
+        await service.RevokeAllSessionsAsync(adminId, tenantId);
+
+        Assert.Null(await service.ValidateAndRotateAsync(adminSession1.PlainToken, null, null));
+        Assert.Null(await service.ValidateAndRotateAsync(adminSession2.PlainToken, null, null));
+
+        // The operator's own session is untouched.
+        Assert.NotNull(await service.ValidateAndRotateAsync(operatorSession.PlainToken, null, null));
+    }
+
+    [Fact]
     public async Task Admin_can_register_user_in_own_tenant()
     {
         var authHash = RandomAuthHash();
@@ -567,6 +685,14 @@ public sealed class AuthenticationTests : IDisposable
         var service = new ProvisionTenantService(ctx, _authHashHasher);
         var result = await service.ProvisionAsync(NewProvisionRequest(authHash));
         return (result.TenantId, result.AdminUserId);
+    }
+
+    private async Task<Guid> RegisterOperatorAsync(Guid tenantId, Guid adminId)
+    {
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new UserRegistrationService(ctx, _authHashHasher);
+        return await service.RegisterInTenantAsync(
+            NewRegisterRequest("operator@x.com", UserRole.Operator), adminId, UserRole.Admin, tenantId);
     }
 
     private async Task SuspendTenantAsync(Guid tenantId)

@@ -13,6 +13,7 @@ public enum AuditAction
     LoginSuccess,
     LoginFailed,
     AccountLocked,
+    SessionsRevoked,
     MfaChallenge,
     EmailOtpRequested,
     EmailOtpVerified,

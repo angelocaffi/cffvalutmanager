@@ -17,4 +17,18 @@ public interface IRefreshTokenService
     /// Returns null when the token is unknown, already revoked/rotated, or expired.
     /// </summary>
     Task<IssuedRefreshToken?> ValidateAndRotateAsync(string plainToken, string? ip, string? userAgent, CancellationToken ct = default);
+
+    /// <summary>Lists the caller's own active (non-revoked, non-expired) sessions, newest first. Never exposes the token or its hash.</summary>
+    Task<IReadOnlyList<ActiveSessionDto>> ListActiveSessionsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes a single session the caller owns (idempotent — a no-op if already revoked or
+    /// expired). Throws <see cref="KeyNotFoundException"/> if no such session belongs to this user.
+    /// Does not invalidate an already-issued access token (see docs/features/authentication.md
+    /// "Logout remoto" for the accepted residual window).
+    /// </summary>
+    Task RevokeSessionAsync(Guid userId, Guid? tenantId, Guid sessionId, CancellationToken ct = default);
+
+    /// <summary>Revokes every active session the caller owns ("logout remoto" — e.g. on suspected compromise).</summary>
+    Task RevokeAllSessionsAsync(Guid userId, Guid? tenantId, CancellationToken ct = default);
 }

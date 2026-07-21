@@ -53,6 +53,35 @@ internal static class AuthEndpoints
             return confirmed ? Results.Ok() : Results.BadRequest();
         }).RequireAuthorization();
 
+        // "Logout remoto" (docs/features/authentication.md): lists/revokes the caller's own
+        // refresh-token sessions. Revoking a session blocks future silent renewal via /refresh, but
+        // an already-issued access token remains valid until its own short expiry (15 min) —
+        // stateless JWTs can't be individually invalidated without a server-side blocklist, so this
+        // is an accepted residual window, same shape as tenant suspension's.
+        app.MapGet("/api/auth/sessions", async (IRefreshTokenService refreshTokens, ITenantContext tenantContext, CancellationToken ct) =>
+            Results.Ok(await refreshTokens.ListActiveSessionsAsync(tenantContext.UserId!.Value, ct)))
+            .RequireAuthorization();
+
+        app.MapPost("/api/auth/sessions/{sessionId:guid}/revoke", async (
+            Guid sessionId, IRefreshTokenService refreshTokens, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                await refreshTokens.RevokeSessionAsync(tenantContext.UserId!.Value, tenantContext.TenantId, sessionId, ct);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).RequireAuthorization();
+
+        app.MapPost("/api/auth/sessions/revoke-all", async (IRefreshTokenService refreshTokens, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            await refreshTokens.RevokeAllSessionsAsync(tenantContext.UserId!.Value, tenantContext.TenantId, ct);
+            return Results.NoContent();
+        }).RequireAuthorization();
+
         return app;
     }
 
