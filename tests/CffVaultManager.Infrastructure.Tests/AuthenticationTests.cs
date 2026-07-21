@@ -11,6 +11,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.RegularExpressions;
 
 namespace CffVaultManager.Infrastructure.Tests;
 
@@ -820,6 +821,179 @@ public sealed class AuthenticationTests : IDisposable
         Assert.Null(await refreshTokens.ValidateAndRotateAsync(session.PlainToken, null, null));
     }
 
+    [Fact]
+    public async Task Provisioning_sends_an_email_verification_code_and_confirming_it_verifies_the_user()
+    {
+        var sender = new FakeEmailSender();
+        Guid adminId;
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            var emailVerification = new EmailVerificationService(ctx, sender);
+            var result = await new ProvisionTenantService(ctx, _authHashHasher, emailVerification)
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+            adminId = result.AdminUserId;
+        }
+
+        Assert.NotNull(sender.LastBody);
+        string code = ExtractCode(sender.LastBody!);
+
+        bool confirmed;
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            confirmed = await new EmailVerificationService(ctx, sender).ConfirmAsync("admin@x.com", code, null, null);
+        }
+
+        Assert.True(confirmed);
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.NotNull(user.EmailVerifiedAt);
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.EmailOtpVerified));
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_with_wrong_code_returns_false_and_does_not_verify()
+    {
+        var sender = new FakeEmailSender();
+        Guid adminId;
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            var result = await new ProvisionTenantService(ctx, _authHashHasher, new EmailVerificationService(ctx, sender))
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+            adminId = result.AdminUserId;
+        }
+
+        string realCode = ExtractCode(sender.LastBody!);
+        string wrongCode = realCode == "000000" ? "111111" : "000000";
+
+        bool confirmed;
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            confirmed = await new EmailVerificationService(ctx, sender).ConfirmAsync("admin@x.com", wrongCode, null, null);
+        }
+
+        Assert.False(confirmed);
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.Null(user.EmailVerifiedAt);
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == adminId && a.Action == AuditAction.EmailOtpFailed));
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_with_unknown_email_returns_false_and_writes_no_audit()
+    {
+        using var ctx = CreateContext(Unresolved());
+        var service = new EmailVerificationService(ctx, new FakeEmailSender());
+
+        bool confirmed = await service.ConfirmAsync("nobody@nowhere.test", "123456", null, null);
+
+        Assert.False(confirmed);
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.False(await verify.AuditLogEntries.IgnoreQueryFilters().AnyAsync());
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_after_max_attempts_returns_false_even_with_the_correct_code()
+    {
+        var sender = new FakeEmailSender();
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new ProvisionTenantService(ctx, _authHashHasher, new EmailVerificationService(ctx, sender))
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+        }
+
+        string realCode = ExtractCode(sender.LastBody!);
+        string wrongCode = realCode == "000000" ? "111111" : "000000";
+
+        // 5 wrong attempts exhausts MaxAttempts for this code.
+        for (int i = 0; i < 5; i++)
+        {
+            using var ctx = CreateContext(Unresolved());
+            Assert.False(await new EmailVerificationService(ctx, sender).ConfirmAsync("admin@x.com", wrongCode, null, null));
+        }
+
+        using var finalCtx = CreateContext(Unresolved());
+        bool confirmed = await new EmailVerificationService(finalCtx, sender).ConfirmAsync("admin@x.com", realCode, null, null);
+        Assert.False(confirmed);
+    }
+
+    [Fact]
+    public async Task ResendAsync_within_cooldown_does_not_generate_a_new_code()
+    {
+        var sender = new FakeEmailSender();
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new ProvisionTenantService(ctx, _authHashHasher, new EmailVerificationService(ctx, sender))
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+        }
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new EmailVerificationService(ctx, sender).ResendAsync("admin@x.com", null, null);
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        int codeCount = await verify.OneTimeCodes.CountAsync(o => o.Purpose == OtpPurpose.EmailVerification);
+        Assert.Equal(1, codeCount);
+    }
+
+    [Fact]
+    public async Task ResendAsync_for_an_already_verified_email_is_a_noop()
+    {
+        var sender = new FakeEmailSender();
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new ProvisionTenantService(ctx, _authHashHasher, new EmailVerificationService(ctx, sender))
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+        }
+
+        string code = ExtractCode(sender.LastBody!);
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            Assert.True(await new EmailVerificationService(ctx, sender).ConfirmAsync("admin@x.com", code, null, null));
+        }
+
+        string? bodyBeforeResend = sender.LastBody;
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new EmailVerificationService(ctx, sender).ResendAsync("admin@x.com", null, null);
+        }
+
+        // No new email was sent: the fake sender's captured body is unchanged.
+        Assert.Equal(bodyBeforeResend, sender.LastBody);
+    }
+
+    [Fact]
+    public async Task RegisterInTenantAsync_also_sends_an_email_verification_code_to_the_new_user()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        var sender = new FakeEmailSender();
+        Guid operatorId;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var emailVerification = new EmailVerificationService(ctx, sender);
+            var service = new UserRegistrationService(ctx, _authHashHasher, emailVerification);
+            operatorId = await service.RegisterInTenantAsync(
+                NewRegisterRequest("operator@x.com", UserRole.Operator), adminId, UserRole.Admin, tenantId);
+        }
+
+        Assert.Equal("operator@x.com", sender.LastToEmail);
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == operatorId && a.Action == AuditAction.EmailOtpRequested));
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private CffVaultManagerDbContext CreateContext(ITenantContext tenantContext)
@@ -903,5 +1077,20 @@ public sealed class AuthenticationTests : IDisposable
         var c = new TenantContext();
         c.SetSuperAdmin(Guid.NewGuid());
         return c;
+    }
+
+    private static string ExtractCode(string body) => Regex.Match(body, @"\d{6}").Value;
+
+    private sealed class FakeEmailSender : IEmailSender
+    {
+        public string? LastToEmail;
+        public string? LastBody;
+
+        public Task SendAsync(string toEmail, string subject, string body, CancellationToken ct = default)
+        {
+            LastToEmail = toEmail;
+            LastBody = body;
+            return Task.CompletedTask;
+        }
     }
 }

@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITotpService, TotpService>();
         services.AddSingleton<ISecretProtector, SecretProtector>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
+        services.AddSingleton<IEmailSender, LoggingEmailSender>();
 
         // Services that touch the (scoped) DbContext.
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
@@ -42,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IMfaSetupService, MfaSetupService>();
         services.AddScoped<IChangeMasterPasswordService, ChangeMasterPasswordService>();
+        services.AddScoped<IEmailVerificationService, EmailVerificationService>();
         services.AddScoped<IVaultService, VaultService>();
         services.AddScoped<IFolderService, FolderService>();
         services.AddScoped<ITagService, TagService>();

@@ -1,3 +1,4 @@
+using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -21,6 +22,9 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
 
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
 
+    /// <summary>The fake registered in place of the real (logging-only) <see cref="IEmailSender"/> — read back to observe one-time codes that would have been emailed.</summary>
+    public FakeEmailSender EmailSender { get; } = new();
+
     public ApiTestFactory() => _connection.Open();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -42,6 +46,10 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
             services.RemoveAll<DbContextOptions<CffVaultManagerDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<CffVaultManagerDbContext>>();
             services.AddDbContext<CffVaultManagerDbContext>(options => options.UseSqlite(_connection));
+
+            // Swap the real (logging-only) email sender for a fake the test can read back from.
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(EmailSender);
         });
     }
 

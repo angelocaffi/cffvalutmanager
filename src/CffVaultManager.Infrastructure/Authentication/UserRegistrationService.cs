@@ -15,11 +15,16 @@ internal sealed class UserRegistrationService : IUserRegistrationService
 {
     private readonly CffVaultManagerDbContext _db;
     private readonly IAuthHashHasher _authHashHasher;
+    private readonly IEmailVerificationService? _emailVerification;
 
-    public UserRegistrationService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher)
+    // emailVerification is optional so DI resolves it to the real service in production; tests
+    // that don't care about email verification can omit it entirely (mirrors the
+    // Argon2Parameters? convenience default on ServerAuthHashHasher).
+    public UserRegistrationService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher, IEmailVerificationService? emailVerification = null)
     {
         _db = db;
         _authHashHasher = authHashHasher;
+        _emailVerification = emailVerification;
     }
 
     public async Task<Guid> RegisterInTenantAsync(
@@ -52,6 +57,13 @@ internal sealed class UserRegistrationService : IUserRegistrationService
         _db.Users.Add(user);
         _db.Vaults.Add(new Vault(Guid.NewGuid(), callingTenantId, "Personale", isOrganizationVault: false, ownerUserId: userId));
         await _db.SaveChangesAsync(ct);
+
+        // Best-effort, after the new user is durably committed — see docs/features/
+        // authentication.md "Verifica email in registrazione".
+        if (_emailVerification is not null)
+        {
+            await _emailVerification.RequestAsync(userId, ip: null, userAgent: null, ct);
+        }
 
         return userId;
     }

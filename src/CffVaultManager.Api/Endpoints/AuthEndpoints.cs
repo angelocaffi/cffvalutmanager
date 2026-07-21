@@ -104,6 +104,26 @@ internal static class AuthEndpoints
             return Results.NoContent();
         }).RequireAuthorization();
 
+        // "Verifica email in registrazione" (docs/features/authentication.md): a code is sent
+        // automatically at the end of registration (ProvisionTenantService/UserRegistrationService);
+        // these two public endpoints let the client resend it and confirm it. Both are
+        // unauthenticated by necessity — the user may not be able to log in yet — so both are
+        // anti-enumeration (uniform response regardless of whether the email exists) and share the
+        // same rate limiter as the other public auth endpoints.
+        app.MapPost("/api/auth/email-verification/resend", async (
+            ResendEmailVerificationRequest request, IEmailVerificationService service, HttpContext http, CancellationToken ct) =>
+        {
+            await service.ResendAsync(request.Email, ClientIp(http), UserAgent(http), ct);
+            return Results.Accepted();
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
+        app.MapPost("/api/auth/email-verification/confirm", async (
+            ConfirmEmailVerificationRequest request, IEmailVerificationService service, HttpContext http, CancellationToken ct) =>
+        {
+            bool confirmed = await service.ConfirmAsync(request.Email, request.Code, ClientIp(http), UserAgent(http), ct);
+            return confirmed ? Results.NoContent() : Results.Unauthorized();
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
         return app;
     }
 
@@ -120,3 +140,7 @@ internal sealed record VerifyMfaRequest(string ChallengeToken, string Code);
 internal sealed record RefreshRequest(string RefreshToken);
 
 internal sealed record ConfirmMfaRequest(string Code);
+
+internal sealed record ResendEmailVerificationRequest(string Email);
+
+internal sealed record ConfirmEmailVerificationRequest(string Email, string Code);

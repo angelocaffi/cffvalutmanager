@@ -157,6 +157,9 @@ public class User
 
     public DateTimeOffset? LastLoginAt { get; set; }
 
+    /// <summary>Null until the user confirms ownership of their email via a one-time code (see docs/features/authentication.md "Verifica email in registrazione").</summary>
+    public DateTimeOffset? EmailVerifiedAt { get; set; }
+
     /// <summary>Consecutive failed login attempts since the last success or the last lockout. Reset to 0 on either.</summary>
     public int FailedLoginAttempts { get; set; }
 

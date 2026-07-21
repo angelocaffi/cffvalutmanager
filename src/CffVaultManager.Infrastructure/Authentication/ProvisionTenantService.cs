@@ -16,11 +16,16 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
 {
     private readonly CffVaultManagerDbContext _db;
     private readonly IAuthHashHasher _authHashHasher;
+    private readonly IEmailVerificationService? _emailVerification;
 
-    public ProvisionTenantService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher)
+    // emailVerification is optional so DI resolves it to the real service in production; tests
+    // that don't care about email verification can omit it entirely (mirrors the
+    // Argon2Parameters? convenience default on ServerAuthHashHasher).
+    public ProvisionTenantService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher, IEmailVerificationService? emailVerification = null)
     {
         _db = db;
         _authHashHasher = authHashHasher;
+        _emailVerification = emailVerification;
     }
 
     public async Task<ProvisionTenantResult> ProvisionAsync(ProvisionTenantRequest request, CancellationToken ct = default)
@@ -83,6 +88,13 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         }
 
         await tx.CommitAsync(ct);
+
+        // Best-effort, after the tenant/admin are durably committed — see docs/features/
+        // authentication.md "Verifica email in registrazione".
+        if (_emailVerification is not null)
+        {
+            await _emailVerification.RequestAsync(adminId, ip: null, userAgent: null, ct);
+        }
 
         return new ProvisionTenantResult(tenantId, adminId);
     }
