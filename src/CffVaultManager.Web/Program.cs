@@ -1,4 +1,7 @@
+using CffVaultManager.Web;
 using CffVaultManager.Web.Components;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -6,16 +9,23 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
 
-// Routes.razor's CascadingAuthenticationState/AuthorizeRouteView render once here on the server
-// during prerendering (before the WASM client takes over), so this host needs the authorization
-// policy machinery too, not just Web.Client — even though every real auth decision (is the vault
-// actually unlocked?) only ever happens client-side, since that's the only place SessionState
-// exists. No AuthenticationStateProvider registered here: the default (anonymous) one is exactly
-// right for a prerender pass, where no session can exist anyway. The full AddAuthorization (not
-// just Blazor's AddAuthorizationCore) is required here: the minimal-hosting model auto-inserts
-// UseAuthorization() into the pipeline once any authorization services are present, and that
-// middleware needs the full registration to satisfy its own startup check.
+// This host never has a real server-side session to check (no cookie, nothing — the JWT and
+// unwrapped DEK live only in the WASM client's memory, see docs/security-model.md). But ASP.NET
+// Core's routing still attaches [Authorize] (from e.g. Vault.razor/Security.razor's
+// @attribute [Authorize]) as HTTP endpoint metadata for every render mode, prerendered or not, and
+// throws outright if it finds that metadata with no authorization middleware configured — so both
+// registrations below exist purely to satisfy that framework requirement, not to perform any real
+// check. NoOpAuthenticationHandler never authenticates anyone;
+// PassthroughAuthorizationMiddlewareResultHandler lets every request through regardless of the
+// outcome. The server therefore unconditionally serves the app shell for every route, exactly like
+// /login already does, and the real "is the vault unlocked" decision is made only where it
+// actually can be: client-side, by AuthorizeRouteView/RedirectToLogin (backed by
+// VaultAuthenticationStateProvider) in Web.Client's Routes.razor.
 builder.Services.AddAuthorization();
+builder.Services
+    .AddAuthentication(NoOpAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, NoOpAuthenticationHandler>(NoOpAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, PassthroughAuthorizationMiddlewareResultHandler>();
 
 var app = builder.Build();
 
