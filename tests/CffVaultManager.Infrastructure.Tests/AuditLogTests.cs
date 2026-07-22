@@ -12,6 +12,7 @@ using CffVaultManager.Infrastructure.VaultCore;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CffVaultManager.Infrastructure.Tests;
@@ -257,6 +258,67 @@ public sealed class AuditLogTests : IDisposable
         Assert.Equal(t3, page1[0].Timestamp);
         Assert.Equal(t2, page2[0].Timestamp);
     }
+
+    // ---- AuditLogRetentionService -------------------------------------------------------------
+
+    [Fact]
+    public async Task PurgeExpiredEntriesAsync_deletes_entries_older_than_the_retention_window()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        await SeedEntryAsync(tenantId, adminId, AuditAction.Viewed, DateTimeOffset.UtcNow.AddDays(-91));
+
+        using var ctx = CreateContext(SuperAdmin());
+        int purged = await new AuditLogRetentionService(ctx, RetentionConfig(90)).PurgeExpiredEntriesAsync();
+
+        Assert.Equal(1, purged);
+        Assert.Empty(await ctx.AuditLogEntries.IgnoreQueryFilters().Where(a => a.Action == AuditAction.Viewed).ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeExpiredEntriesAsync_keeps_entries_within_the_retention_window()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        await SeedEntryAsync(tenantId, adminId, AuditAction.Viewed, DateTimeOffset.UtcNow.AddDays(-89));
+
+        using var ctx = CreateContext(SuperAdmin());
+        int purged = await new AuditLogRetentionService(ctx, RetentionConfig(90)).PurgeExpiredEntriesAsync();
+
+        Assert.Equal(0, purged);
+        Assert.Single(await ctx.AuditLogEntries.IgnoreQueryFilters().Where(a => a.Action == AuditAction.Viewed).ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeExpiredEntriesAsync_honors_a_configured_retention_window()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        await SeedEntryAsync(tenantId, adminId, AuditAction.Viewed, DateTimeOffset.UtcNow.AddDays(-10));
+
+        using var ctx = CreateContext(SuperAdmin());
+        int purged = await new AuditLogRetentionService(ctx, RetentionConfig(7)).PurgeExpiredEntriesAsync();
+
+        Assert.Equal(1, purged);
+    }
+
+    [Fact]
+    public async Task PurgeExpiredEntriesAsync_purges_entries_across_every_tenant()
+    {
+        var (tenant1Id, admin1Id, _) = await ProvisionAsync("acme1", "admin1@x.com");
+        var (tenant2Id, admin2Id, _) = await ProvisionAsync("acme2", "admin2@x.com");
+        await SeedEntryAsync(tenant1Id, admin1Id, AuditAction.Viewed, DateTimeOffset.UtcNow.AddDays(-91));
+        await SeedEntryAsync(tenant2Id, admin2Id, AuditAction.Viewed, DateTimeOffset.UtcNow.AddDays(-91));
+
+        using var ctx = CreateContext(SuperAdmin());
+        int purged = await new AuditLogRetentionService(ctx, RetentionConfig(90)).PurgeExpiredEntriesAsync();
+
+        Assert.Equal(2, purged);
+    }
+
+    private static IConfiguration RetentionConfig(int retentionDays) => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AuditLog:RetentionDays"] = retentionDays.ToString(),
+        })
+        .Build();
 
     // ---- Helpers -----------------------------------------------------------------------------
 

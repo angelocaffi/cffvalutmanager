@@ -73,6 +73,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVaultItemService, VaultItemService>();
         services.AddScoped<IVaultMembershipService, VaultMembershipService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
+        services.AddScoped<IAuditLogRetentionService, AuditLogRetentionService>();
+        services.AddHostedService<AuditLogRetentionHostedService>();
 
         return services;
     }
