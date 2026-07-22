@@ -101,6 +101,22 @@ internal static class AuthEndpoints
             Results.Ok(await service.GetOwnProfileAsync(tenantContext.UserId!.Value, ct)))
             .RequireAuthorization();
 
+        // Sets the caller's long-term X25519 keypair (see docs/features/sharing-access-control.md).
+        // Set-once: generating a new one later would orphan anything already wrapped for the old
+        // public key, so a second attempt is a 409, not a silent overwrite.
+        app.MapPost("/api/auth/keypair", async (SetKeyPairRequest request, IKeyPairService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                await service.SetKeyPairAsync(tenantContext.UserId!.Value, request.PublicKey, request.EncryptedPrivateKey, ct);
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        }).RequireAuthorization();
+
         app.MapPost("/api/auth/mfa/setup", async (IMfaSetupService service, ITenantContext tenantContext, CancellationToken ct) =>
         {
             string uri = await service.SetupTotpAsync(tenantContext.UserId!.Value, ct);
@@ -193,3 +209,5 @@ internal sealed record ConfirmMfaRequest(string Code);
 internal sealed record ResendEmailVerificationRequest(string Email);
 
 internal sealed record ConfirmEmailVerificationRequest(string Email, string Code);
+
+internal sealed record SetKeyPairRequest(byte[] PublicKey, byte[] EncryptedPrivateKey);

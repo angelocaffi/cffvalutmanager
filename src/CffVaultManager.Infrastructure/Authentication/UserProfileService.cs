@@ -23,6 +23,6 @@ internal sealed class UserProfileService : IUserProfileService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
             ?? throw new InvalidOperationException("User not found.");
 
-        return new UserProfileDto(user.Email, user.EmailVerifiedAt is not null, user.MfaEnabled, user.MfaEmailOtpEnabled);
+        return new UserProfileDto(user.Email, user.EmailVerifiedAt is not null, user.MfaEnabled, user.MfaEmailOtpEnabled, user.PublicKey is not null);
     }
 }

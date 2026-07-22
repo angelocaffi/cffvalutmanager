@@ -11,6 +11,7 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 // under the browser-wasm runtime, see docs/features/encryption-key-management.md.
 builder.Services.AddSingleton<IKeyDerivationService, Argon2KeyDerivationService>();
 builder.Services.AddSingleton<IAeadCipherService, AesGcmCipherService>();
+builder.Services.AddSingleton<IAsymmetricKeyExchangeService, X25519KeyExchangeService>();
 builder.Services.AddSingleton<IDekService, DekService>();
 builder.Services.AddSingleton<IAuthHashService, AuthHashService>();
 
@@ -42,11 +43,13 @@ builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<FileDownloadJsInterop>();
 builder.Services.AddScoped<UrlFragmentJsInterop>();
 builder.Services.AddScoped<TokenRefreshScheduler>();
+builder.Services.AddScoped<KeyPairProvisioningService>();
 
 var host = builder.Build();
 
-// Resolved eagerly (never injected into a component) purely so its constructor subscribes to
+// Resolved eagerly (never injected into a component) purely so their constructors subscribe to
 // SessionState.Changed from app startup, regardless of which page is first navigated to.
 host.Services.GetRequiredService<TokenRefreshScheduler>();
+host.Services.GetRequiredService<KeyPairProvisioningService>();
 
 await host.RunAsync();

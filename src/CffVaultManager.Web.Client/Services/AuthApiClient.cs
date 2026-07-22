@@ -110,6 +110,20 @@ public sealed class AuthApiClient
         (await _http.GetFromJsonAsync<UserProfileResponse>("/api/auth/me", JsonOptions, ct))!;
 
     /// <summary>
+    /// Sets the caller's long-term X25519 keypair (see docs/features/sharing-access-control.md).
+    /// Set-once server-side: a second call returns 409, which the caller should treat as a no-op
+    /// (someone/something else already provisioned one for this account).
+    /// </summary>
+    public async Task<bool> SetKeyPairAsync(byte[] publicKey, byte[] encryptedPrivateKey, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/keypair",
+            new { PublicKey = publicKey, EncryptedPrivateKey = encryptedPrivateKey },
+            ct);
+        return response.IsSuccessStatusCode;
+    }
+
+    /// <summary>
     /// Enables Email OTP as an MFA factor. Fails with a 409-derived message if the account's
     /// email has never been verified — the server refuses to send codes to an unproven address.
     /// </summary>
@@ -201,7 +215,7 @@ public sealed record LoginResponse(
     IReadOnlyList<string>? AvailableMfaFactors,
     CryptoMaterialsResponse? CryptoMaterials);
 
-public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled);
+public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled, bool HasKeyPair);
 
 public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 

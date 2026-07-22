@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailOtpMfaService, EmailOtpMfaService>();
         services.AddScoped<IWebAuthnService, WebAuthnService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
+        services.AddScoped<IKeyPairService, KeyPairService>();
         services.AddScoped<IChangeMasterPasswordService, ChangeMasterPasswordService>();
         services.AddScoped<IEmailVerificationService, EmailVerificationService>();
         services.AddScoped<ISecurityNotificationService, SecurityNotificationService>();
