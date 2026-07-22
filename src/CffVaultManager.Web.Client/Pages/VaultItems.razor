@@ -9,39 +9,9 @@
 @inject IAeadCipherService AeadCipher
 @inject NavigationManager Navigation
 @inject ItemKeyResolver ItemKeyResolver
+@inject ClipboardJsInterop Clipboard
 
 <PageTitle>Vault</PageTitle>
-
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
-    <h1 class="h3 mb-0">Le tue voci</h1>
-    <div class="dropdown">
-        <button class="btn btn-info dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-            Nuova voce
-        </button>
-        <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
-            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
-            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
-            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.SecureNote)">Nota sicura</a></li>
-            <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.GenericSecret)">Secret generico</a></li>
-        </ul>
-    </div>
-</div>
-
-<div class="d-flex flex-wrap gap-2 mb-3">
-    <input type="search" class="form-control" style="max-width: 16rem;" placeholder="Cerca…"
-           @bind="_searchText" @bind:event="oninput" />
-    <select class="form-select" style="max-width: 14rem;" @bind="_typeFilter">
-        <option value="">Tutti i tipi</option>
-        <option value="@VaultItemTypes.Password">Password</option>
-        <option value="@VaultItemTypes.CreditCard">Carte di credito</option>
-        <option value="@VaultItemTypes.CryptoWallet">Crypto wallet</option>
-        <option value="@VaultItemTypes.SecureNote">Note sicure</option>
-        <option value="@VaultItemTypes.GenericSecret">Secret generici</option>
-    </select>
-    <a class="btn btn-outline-secondary ms-auto" href="@($"/vault/{VaultId}/backup")">Backup</a>
-    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}/trash")">Cestino</a>
-</div>
 
 @if (_errorMessage is not null)
 {
@@ -59,47 +29,275 @@ else
 {
     var visible = _items.Where(MatchesFilter).ToList();
 
-    if (visible.Count == 0)
-    {
-        <p class="text-body-secondary">Nessuna voce trovata.</p>
-    }
-    else
-    {
-        <div class="list-group" style="max-width: 40rem;">
-            @foreach (var item in visible)
+    <div class="vault-shell">
+        <aside class="vault-sidebar @(_selectedId is null ? "d-flex" : "d-none d-lg-flex")">
+            <div class="dropdown mb-3">
+                <button class="btn btn-info dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Nuova voce
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
+                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
+                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
+                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.SecureNote)">Nota sicura</a></li>
+                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.GenericSecret)">Secret generico</a></li>
+                </ul>
+            </div>
+
+            <button type="button" class="vault-sidebar-link @(!_favoritesOnly && _selectedFolderId is null ? "active" : null)" @onclick="() => SetScope(null, false)">
+                <span>Tutte le voci</span>
+                <span class="vault-sidebar-count">@_items.Count</span>
+            </button>
+            <button type="button" class="vault-sidebar-link @(_favoritesOnly ? "active" : null)" @onclick="() => SetScope(_selectedFolderId, true)">
+                <span>★ Preferiti</span>
+                <span class="vault-sidebar-count">@_items.Count(i => i.IsFavorite)</span>
+            </button>
+
+            <div class="vault-sidebar-heading">Tipo</div>
+            @foreach (var type in AllTypes)
             {
-                var summary = _summaries.GetValueOrDefault(item.Id) ?? new DecryptedSummary("(non decifrabile)", null);
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <button type="button" class="btn btn-link p-0 me-2" title="Preferito" disabled="@_busy" @onclick="() => ToggleFavoriteAsync(item)">
-                        @(item.IsFavorite ? "★" : "☆")
-                    </button>
-                    <a class="flex-grow-1 text-body text-decoration-none" href="@ItemUrl(item.Id)">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge text-bg-secondary">@TypeLabel(item.Type)</span>
-                            <span>@summary.Title</span>
-                        </div>
-                        @if (!string.IsNullOrEmpty(summary.Subtitle))
-                        {
-                            <div class="text-body-secondary small">@summary.Subtitle</div>
-                        }
-                    </a>
-                    <button type="button" class="btn btn-outline-danger btn-sm ms-2" disabled="@_busy" @onclick="() => DeleteAsync(item)">
-                        Elimina
-                    </button>
+                <button type="button" class="vault-sidebar-link @(_typeFilter == type ? "active" : null)" @onclick="() => ToggleTypeFilter(type)">
+                    <span>@TypeLabel(type)</span>
+                    <span class="vault-sidebar-count">@_items.Count(i => i.Type == type)</span>
+                </button>
+            }
+
+            <div class="vault-sidebar-heading">Cartelle</div>
+            @foreach (var folder in _folders)
+            {
+                <button type="button" class="vault-sidebar-link @(_selectedFolderId == folder.Id ? "active" : null)" @onclick="() => SetScope(folder.Id, _favoritesOnly)">
+                    <span class="text-truncate">@folder.Name</span>
+                    <span class="vault-sidebar-count">@_items.Count(i => i.FolderId == folder.Id)</span>
+                </button>
+            }
+            <form class="d-flex gap-1 mt-1" @onsubmit="CreateFolderAsync" @onsubmit:preventDefault="true">
+                <input class="form-control form-control-sm" placeholder="Nuova cartella…" @bind="_newFolderName" @bind:event="oninput" />
+                <button type="submit" class="btn btn-outline-secondary btn-sm" disabled="@string.IsNullOrWhiteSpace(_newFolderName)">+</button>
+            </form>
+
+            <div class="vault-sidebar-footer">
+                <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/backup")">Backup</a>
+                <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/trash")">Cestino</a>
+            </div>
+        </aside>
+
+        <section class="vault-list-pane @(_selectedId is null ? "d-flex" : "d-none d-lg-flex")">
+            <input type="search" class="form-control mb-2" placeholder="Cerca…" @bind="_searchText" @bind:event="oninput" />
+
+            @if (visible.Count == 0)
+            {
+                <EmptyState Message="Nessuna voce trovata." />
+            }
+            else
+            {
+                <div class="vault-row-list">
+                    @foreach (var item in visible)
+                    {
+                        var summary = _summaries.GetValueOrDefault(item.Id) ?? new DecryptedSummary("(non decifrabile)", null);
+                        <button type="button" class="vault-row @(_selectedId == item.Id ? "active" : null)" @onclick="() => SelectAsync(item)">
+                            <span class="badge text-bg-secondary vault-row-badge">@TypeLabel(item.Type)</span>
+                            <span class="vault-row-text">
+                                <span class="vault-row-title">@summary.Title</span>
+                                @if (!string.IsNullOrEmpty(summary.Subtitle))
+                                {
+                                    <span class="vault-row-subtitle">@summary.Subtitle</span>
+                                }
+                            </span>
+                            @if (item.IsFavorite)
+                            {
+                                <span class="vault-row-star" title="Preferito">★</span>
+                            }
+                        </button>
+                    }
                 </div>
             }
-        </div>
-    }
+        </section>
+
+        <section class="vault-detail-pane @(_selectedId is null ? "d-none d-lg-flex" : "d-flex")">
+            @{ var selectedItem = _selectedId is { } sid ? _items.FirstOrDefault(i => i.Id == sid) : null; }
+            @if (selectedItem is null)
+            {
+                <EmptyState Message="Seleziona una voce dall'elenco per vederne i dettagli." />
+            }
+            else
+            {
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm d-lg-none" @onclick="() => _selectedId = null">← Indietro</button>
+                    <span class="badge text-bg-secondary">@TypeLabel(selectedItem.Type)</span>
+                    <h2 class="h5 mb-0 text-truncate flex-grow-1">@(_summaries.GetValueOrDefault(selectedItem.Id)?.Title ?? "…")</h2>
+                    <button type="button" class="btn btn-link p-0" title="Preferito" disabled="@_busy" @onclick="() => ToggleFavoriteAsync(selectedItem)">
+                        @(selectedItem.IsFavorite ? "★" : "☆")
+                    </button>
+                </div>
+
+                @if (_detailLoading)
+                {
+                    <div class="d-flex align-items-center gap-2 text-body-secondary">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Decifratura…</span>
+                    </div>
+                }
+                else if (_selectedPayload is null)
+                {
+                    <div class="alert alert-warning py-2" role="alert">Impossibile decifrare questa voce.</div>
+                }
+                else
+                {
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ToggleRevealSelectedAsync">
+                            @(_selectedRevealed ? "Nascondi campi sensibili" : "Mostra campi sensibili")
+                        </button>
+                    </div>
+
+                    @if (_selectedPayload is PasswordPayload pw)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label small text-body-secondary">Username</label>
+                            <div class="input-group">
+                                <input class="form-control" readonly value="@(pw.Username ?? "—")" />
+                                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(pw.Username)">Copia</button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-body-secondary">Password</label>
+                            <div class="input-group">
+                                <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? pw.Password : Mask(pw.Password))" />
+                                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(pw.Password)">Copia</button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(pw.Url))
+                        {
+                            <div class="mb-3"><label class="form-label small text-body-secondary">URL</label><div><a href="@pw.Url" target="_blank" rel="noopener noreferrer">@pw.Url</a></div></div>
+                        }
+                        @if (!string.IsNullOrEmpty(pw.Notes))
+                        {
+                            <div class="mb-3"><label class="form-label small text-body-secondary">Note</label><p class="mb-0">@pw.Notes</p></div>
+                        }
+                    }
+                    else if (_selectedPayload is CreditCardPayload cc)
+                    {
+                        <div class="mb-3"><label class="form-label small text-body-secondary">Intestatario</label><div>@cc.CardholderName</div></div>
+                        <div class="mb-3">
+                            <label class="form-label small text-body-secondary">Numero carta</label>
+                            <div class="input-group">
+                                <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? cc.CardNumber : Mask(cc.CardNumber))" />
+                                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(cc.CardNumber)">Copia</button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-body-secondary">CVV</label>
+                            <div class="input-group" style="max-width: 10rem;">
+                                <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? cc.Cvv : Mask(cc.Cvv))" />
+                                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(cc.Cvv)">Copia</button>
+                            </div>
+                        </div>
+                        <div class="mb-3"><label class="form-label small text-body-secondary">Scadenza</label><div>@(cc.ExpiryMonth?.ToString("D2") ?? "--")/@cc.ExpiryYear</div></div>
+                    }
+                    else if (_selectedPayload is CryptoWalletPayload wallet)
+                    {
+                        @if (!string.IsNullOrEmpty(wallet.Network))
+                        {
+                            <div class="mb-3"><label class="form-label small text-body-secondary">Rete</label><div>@wallet.Network</div></div>
+                        }
+                        @foreach (var address in wallet.Addresses)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small text-body-secondary">Indirizzo</label>
+                                <div class="input-group">
+                                    <input class="form-control font-monospace" readonly value="@address" />
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(address)">Copia</button>
+                                </div>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(wallet.PrivateKey))
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small text-body-secondary">Chiave privata</label>
+                                <div class="input-group">
+                                    <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? wallet.PrivateKey : Mask(wallet.PrivateKey))" />
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(wallet.PrivateKey)">Copia</button>
+                                </div>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(wallet.Mnemonic))
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small text-body-secondary">Seed phrase</label>
+                                <div class="input-group">
+                                    <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? wallet.Mnemonic : Mask(wallet.Mnemonic))" />
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(wallet.Mnemonic)">Copia</button>
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (_selectedPayload is SecureNotePayload note)
+                    {
+                        <div class="mb-3"><p class="mb-0" style="white-space: pre-wrap;">@note.Content</p></div>
+                    }
+                    else if (_selectedPayload is GenericSecretPayload generic)
+                    {
+                        @foreach (var field in generic.Fields)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small text-body-secondary">@field.Key</label>
+                                <div class="input-group">
+                                    <input class="form-control font-monospace" readonly value="@(_selectedRevealed ? field.Value : Mask(field.Value))" />
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => CopySensitiveAsync(field.Value)">Copia</button>
+                                </div>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(generic.Notes))
+                        {
+                            <div class="mb-3"><label class="form-label small text-body-secondary">Note</label><p class="mb-0">@generic.Notes</p></div>
+                        }
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label small text-body-secondary">Cartella</label>
+                        <select class="form-select form-select-sm" style="max-width: 16rem;" value="@(selectedItem.FolderId?.ToString() ?? "")" @onchange="e => MoveToFolderAsync(selectedItem, e.Value?.ToString())">
+                            <option value="">Nessuna cartella</option>
+                            @foreach (var folder in _folders)
+                            {
+                                <option value="@folder.Id">@folder.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                <div class="d-flex gap-2 mt-auto pt-3">
+                    <a class="btn btn-info btn-sm" href="@ItemUrl(selectedItem.Id)">Apri / Modifica</a>
+                    <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => DeleteSelectedAsync(selectedItem)">Elimina</button>
+                </div>
+            }
+        </section>
+    </div>
 }
 
 @code {
+    private static readonly string[] AllTypes =
+    [
+        VaultItemTypes.Password, VaultItemTypes.CreditCard, VaultItemTypes.CryptoWallet,
+        VaultItemTypes.SecureNote, VaultItemTypes.GenericSecret
+    ];
+
     [Parameter]
     public Guid VaultId { get; set; }
 
     private IReadOnlyList<VaultItemResponse>? _items;
     private readonly Dictionary<Guid, DecryptedSummary> _summaries = new();
+    private IReadOnlyList<FolderResponse> _folders = [];
+    private string _newFolderName = string.Empty;
+
     private string _searchText = string.Empty;
     private string _typeFilter = string.Empty;
+    private Guid? _selectedFolderId;
+    private bool _favoritesOnly;
+
+    private Guid? _selectedId;
+    private object? _selectedPayload;
+    private bool _selectedRevealed;
+    private bool _detailLoading;
+
     private string? _errorMessage;
     private bool _busy;
 
@@ -109,6 +307,7 @@ else
     {
         _errorMessage = null;
         _items = await VaultApi.ListItemsAsync(VaultId);
+        _folders = await VaultApi.ListFoldersAsync(VaultId);
 
         byte[] dek = Session.RequireDek();
         _summaries.Clear();
@@ -120,6 +319,12 @@ else
                 ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
                 : dek;
             _summaries[item.Id] = Summarize(item, key);
+        }
+
+        if (_selectedId is { } id && _items.All(i => i.Id != id))
+        {
+            _selectedId = null;
+            _selectedPayload = null;
         }
     }
 
@@ -184,6 +389,16 @@ else
 
     private bool MatchesFilter(VaultItemResponse item)
     {
+        if (_favoritesOnly && !item.IsFavorite)
+        {
+            return false;
+        }
+
+        if (_selectedFolderId is { } folderId && item.FolderId != folderId)
+        {
+            return false;
+        }
+
         if (!string.IsNullOrEmpty(_typeFilter) && item.Type != _typeFilter)
         {
             return false;
@@ -197,6 +412,123 @@ else
         var summary = _summaries.GetValueOrDefault(item.Id);
         return (summary?.Title.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false)
             || (summary?.Subtitle?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private void SetScope(Guid? folderId, bool favoritesOnly)
+    {
+        _selectedFolderId = folderId;
+        _favoritesOnly = favoritesOnly;
+    }
+
+    private void ToggleTypeFilter(string type) => _typeFilter = _typeFilter == type ? string.Empty : type;
+
+    private async Task CreateFolderAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newFolderName))
+        {
+            return;
+        }
+
+        await VaultApi.CreateFolderAsync(VaultId, _newFolderName.Trim());
+        _newFolderName = string.Empty;
+        _folders = await VaultApi.ListFoldersAsync(VaultId);
+    }
+
+    private async Task SelectAsync(VaultItemResponse item)
+    {
+        _selectedId = item.Id;
+        _selectedPayload = null;
+        _selectedRevealed = false;
+        _detailLoading = true;
+        StateHasChanged();
+
+        _selectedPayload = await DecryptFullPayloadAsync(item);
+        _detailLoading = false;
+    }
+
+    private async Task<object?> DecryptFullPayloadAsync(VaultItemResponse item)
+    {
+        try
+        {
+            byte[] dek = Session.RequireDek();
+            byte[] key = item.MySharedAccess is { } access
+                ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
+                : dek;
+            var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
+            byte[] plaintext = AeadCipher.Decrypt(blob, key);
+
+            return item.Type switch
+            {
+                VaultItemTypes.Password => JsonSerializer.Deserialize<PasswordPayload>(plaintext),
+                VaultItemTypes.CreditCard => JsonSerializer.Deserialize<CreditCardPayload>(plaintext),
+                VaultItemTypes.CryptoWallet => JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext),
+                VaultItemTypes.SecureNote => JsonSerializer.Deserialize<SecureNotePayload>(plaintext),
+                VaultItemTypes.GenericSecret => JsonSerializer.Deserialize<GenericSecretPayload>(plaintext),
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task ToggleRevealSelectedAsync()
+    {
+        _selectedRevealed = !_selectedRevealed;
+        if (_selectedRevealed && _selectedId is { } id)
+        {
+            await VaultApi.RecordRevealAsync(VaultId, id);
+        }
+    }
+
+    private async Task CopyAsync(string? value)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            await Clipboard.CopyWithAutoClearAsync(value);
+        }
+    }
+
+    private async Task CopySensitiveAsync(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        if (_selectedId is { } id)
+        {
+            await VaultApi.RecordRevealAsync(VaultId, id);
+        }
+
+        await Clipboard.CopyWithAutoClearAsync(value);
+    }
+
+    private static string Mask(string? value) => string.IsNullOrEmpty(value) ? "—" : new string('•', Math.Min(value.Length, 16));
+
+    private async Task MoveToFolderAsync(VaultItemResponse item, string? folderIdText)
+    {
+        Guid? folderId = Guid.TryParse(folderIdText, out var parsed) ? parsed : null;
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var (success, _, error) = await VaultApi.UpdateItemAsync(
+                VaultId, item.Id, item.Type, item.EncryptedPayload, folderId, item.IsFavorite);
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task ToggleFavoriteAsync(VaultItemResponse item)
@@ -221,7 +553,7 @@ else
         }
     }
 
-    private async Task DeleteAsync(VaultItemResponse item)
+    private async Task DeleteSelectedAsync(VaultItemResponse item)
     {
         _errorMessage = null;
         _busy = true;
@@ -233,6 +565,8 @@ else
                 return;
             }
 
+            _selectedId = null;
+            _selectedPayload = null;
             await ReloadAsync();
         }
         finally

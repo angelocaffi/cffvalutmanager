@@ -2,7 +2,7 @@
 @inject SessionState Session
 @inject NavigationManager Navigation
 
-<nav class="navbar navbar-expand navbar-dark app-navbar">
+<nav class="navbar navbar-expand navbar-dark app-navbar sticky-top">
     <div class="container-fluid">
         <a class="navbar-brand d-flex align-items-center gap-2" href="/">
             <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="app-logo" />
@@ -12,11 +12,11 @@
         @if (Session.IsUnlocked)
         {
             <div class="d-flex align-items-center gap-3">
-                <a class="nav-link text-white-50" href="/vault">Vault</a>
-                <a class="nav-link text-white-50" href="/shared-with-me">Condivisi con me</a>
-                <a class="nav-link text-white-50" href="/password-health">Salute password</a>
-                <a class="nav-link text-white-50" href="/activity">Attività</a>
-                <a class="nav-link text-white-50" href="/security">Sicurezza</a>
+                <NavLink class="nav-link text-white-50" href="/vault" Match="NavLinkMatch.Prefix">Vault</NavLink>
+                <NavLink class="nav-link text-white-50" href="/shared-with-me" Match="NavLinkMatch.Prefix">Condivisi con me</NavLink>
+                <NavLink class="nav-link text-white-50" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink>
+                <NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink>
+                <NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink>
                 <span class="text-white-50 small d-none d-sm-inline">@Session.Email</span>
                 <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
             </div>

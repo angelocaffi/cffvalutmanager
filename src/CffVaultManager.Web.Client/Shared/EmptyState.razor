@@ -1,0 +1,15 @@
+<div class="empty-state @(Compact ? "empty-state-compact" : null)">
+    <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9.75h16.5M3.75 9.75 5.83 4.72A1.5 1.5 0 0 1 7.24 3.75h9.52a1.5 1.5 0 0 1 1.41.97l2.08 5.03M3.75 9.75v8.25a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5V9.75M8.25 13.5h7.5" />
+    </svg>
+    <p class="mb-0">@Message</p>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Reduced padding for use inside an already-small container (e.g. a card body), instead of a full page area.</summary>
+    [Parameter]
+    public bool Compact { get; set; }
+}

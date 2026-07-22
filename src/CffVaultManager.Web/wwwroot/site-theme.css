@@ -74,3 +74,221 @@
     border-color: var(--brand-cyan);
     box-shadow: 0 0 0 0.25rem rgba(var(--brand-cyan-rgb), 0.25);
 }
+
+/*
+ * Design-system layer added on top of the palette above: typography rhythm, elevation, motion
+ * and a couple of small reusable patterns (empty states, auth shell, vault tiles) shared by
+ * every page in Web.Client. Everything here targets Bootstrap's own classes/markup so individual
+ * pages keep using plain `card`/`list-group`/`table`/`btn` — no per-page CSS isolation file needed
+ * just to look consistent (that's what caused `.login-shell`/`.login-card`/`.login-logo` to only
+ * ever apply to Login.razor and silently not to Register.razor, which reuses the same class names
+ * from a component-scoped file: Blazor CSS isolation scopes rules to the *file* that owns them,
+ * not to a class name. Fixed here by living in this global stylesheet instead.
+ */
+
+/* ---- Typography & page rhythm ------------------------------------------------------------- */
+
+body {
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .h1, .h2, .h3 {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+/* Every page's top-level `<h1 class="h3 ...">` gets consistent breathing room from the content
+   below it, without every page having to remember a margin utility class. */
+main > h1:first-child,
+main > .d-flex:first-child > h1 {
+    margin-bottom: 0.25rem;
+}
+
+main {
+    max-width: 75rem;
+    margin-inline: auto;
+}
+
+/* ---- Navbar -------------------------------------------------------------------------------- */
+
+.app-navbar {
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.15);
+}
+
+.app-navbar .nav-link {
+    position: relative;
+    padding-block: 0.375rem;
+    transition: color 0.15s ease-in-out;
+}
+
+.app-navbar .nav-link:hover {
+    color: #fff !important;
+}
+
+/* Underline indicator on the current section — NavLink (not a plain <a>) supplies the "active"
+   class, so this only ever lights up the route actually being viewed. */
+.app-navbar .nav-link.active {
+    color: #fff !important;
+}
+
+.app-navbar .nav-link.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -0.375rem;
+    height: 2px;
+    background: var(--brand-cyan);
+    border-radius: 1px;
+}
+
+/* ---- Elevation & motion --------------------------------------------------------------------- */
+
+.card {
+    border: 1px solid rgba(var(--brand-navy-rgb), 0.08);
+    box-shadow: 0 0.125rem 0.5rem rgba(var(--brand-navy-rgb), 0.06);
+}
+
+a.list-group-item-action,
+a.card {
+    transition: box-shadow 0.15s ease-in-out, transform 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+a.list-group-item-action:hover,
+a.card:hover {
+    box-shadow: 0 0.5rem 1.25rem -0.25rem rgba(var(--brand-navy-rgb), 0.18);
+    transform: translateY(-1px);
+}
+
+.btn {
+    transition: box-shadow 0.15s ease-in-out, transform 0.05s ease-in-out;
+}
+
+.btn:not(:disabled):not(.btn-link):hover {
+    box-shadow: 0 0.25rem 0.75rem -0.25rem rgba(var(--brand-navy-rgb), 0.35);
+}
+
+.btn:not(:disabled):active {
+    transform: translateY(1px);
+}
+
+/* ---- Tables -------------------------------------------------------------------------------- */
+
+.table-responsive {
+    border-radius: var(--bs-border-radius);
+    border: 1px solid var(--bs-border-color);
+}
+
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: var(--bs-secondary-color);
+    border-bottom-width: 1px;
+    background-color: rgba(var(--brand-navy-rgb), 0.03);
+}
+
+.table tbody tr {
+    transition: background-color 0.1s ease-in-out;
+}
+
+/* ---- Badges ---------------------------------------------------------------------------------- */
+
+.badge {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 0.4em 0.65em;
+}
+
+/* ---- Empty states (Shared/EmptyState.razor) -------------------------------------------------- */
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3.5rem 1.5rem;
+    color: var(--bs-secondary-color);
+    text-align: center;
+}
+
+.empty-state-compact {
+    padding: 1.5rem 1rem;
+}
+
+.empty-state-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    opacity: 0.45;
+}
+
+.empty-state-compact .empty-state-icon {
+    width: 2rem;
+    height: 2rem;
+}
+
+/* ---- Auth pages (Login.razor / Register.razor) ----------------------------------------------- */
+
+.login-shell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 8rem);
+    margin-top: 1rem;
+    position: relative;
+    isolation: isolate;
+}
+
+.login-shell::before {
+    content: "";
+    position: absolute;
+    inset: -3rem -2rem auto -2rem;
+    height: 22rem;
+    background: radial-gradient(60% 60% at 50% 0%, rgba(var(--brand-teal-rgb), 0.16), transparent 70%);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 25rem;
+    border: none;
+    box-shadow: 0 1rem 2.5rem -1rem rgba(var(--brand-navy-rgb), 0.28), 0 0.25rem 0.75rem -0.25rem rgba(var(--brand-navy-rgb), 0.12);
+}
+
+.login-logo {
+    height: 3.5rem;
+    width: auto;
+}
+
+/* ---- Vault tiles (Vault.razor) ---------------------------------------------------------------- */
+
+.vault-tile-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--bs-border-radius);
+}
+
+.vault-tile-icon svg {
+    width: 1.375rem;
+    height: 1.375rem;
+}
+
+.vault-tile-icon-personal {
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--brand-navy);
+}
+
+.vault-tile-icon-org {
+    background-color: var(--bs-secondary-bg-subtle);
+    color: var(--brand-teal);
+}

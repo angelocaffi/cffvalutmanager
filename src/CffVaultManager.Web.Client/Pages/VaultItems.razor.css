@@ -1,0 +1,162 @@
+/* Three-pane master-detail shell (sidebar / list / detail), the same layout family as most
+   desktop password managers: browsing an item never leaves this page, only the full edit form
+   (Pages/VaultItemDetail.razor) does. See docs/features/vault-core.md. */
+
+.vault-shell {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.25rem;
+}
+
+.vault-sidebar {
+    flex: 0 0 14rem;
+    flex-direction: column;
+    gap: 0.125rem;
+    position: sticky;
+    top: 5.5rem;
+}
+
+.vault-sidebar-heading {
+    margin-top: 0.75rem;
+    margin-bottom: 0.125rem;
+    padding-inline: 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+}
+
+.vault-sidebar-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border: none;
+    background: transparent;
+    text-align: left;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--bs-border-radius-sm);
+    color: var(--brand-ink);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.vault-sidebar-link:hover {
+    background-color: rgba(var(--brand-navy-rgb), 0.06);
+}
+
+.vault-sidebar-link.active {
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--brand-navy);
+    font-weight: 600;
+}
+
+.vault-sidebar-count {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+}
+
+.vault-sidebar-footer {
+    margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--bs-border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.vault-list-pane {
+    flex: 0 0 22rem;
+    flex-direction: column;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+.vault-row-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.vault-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: #fff;
+    border-radius: var(--bs-border-radius);
+    padding: 0.55rem 0.75rem;
+    transition: background-color 0.1s ease-in-out, border-color 0.1s ease-in-out;
+}
+
+.vault-row:hover {
+    background-color: rgba(var(--brand-navy-rgb), 0.04);
+}
+
+.vault-row.active {
+    background-color: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary-border-subtle);
+}
+
+.vault-row-badge {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+}
+
+.vault-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex-grow: 1;
+}
+
+.vault-row-title {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vault-row-subtitle {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vault-row-star {
+    flex-shrink: 0;
+    color: var(--brand-cyan);
+}
+
+.vault-detail-pane {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid rgba(var(--brand-navy-rgb), 0.08);
+    border-radius: var(--bs-border-radius-lg);
+    box-shadow: 0 0.125rem 0.5rem rgba(var(--brand-navy-rgb), 0.06);
+    padding: 1.25rem;
+    min-height: 24rem;
+}
+
+@media (max-width: 991.98px) {
+    .vault-shell {
+        flex-direction: column;
+    }
+
+    .vault-sidebar,
+    .vault-list-pane,
+    .vault-detail-pane {
+        flex: 1 1 auto;
+        width: 100%;
+        position: static;
+        max-height: none;
+    }
+}
