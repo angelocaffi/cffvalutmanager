@@ -32,4 +32,5 @@ public enum AuditAction
     ExternalShareLinkRevoked,
     ItemMembershipGranted,
     ItemMembershipRevoked,
+    DekRotated,
 }

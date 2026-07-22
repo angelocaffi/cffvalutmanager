@@ -156,6 +156,17 @@ internal static class AuthEndpoints
                 : Results.Json(new { error = "Current master password is incorrect." }, statusCode: StatusCodes.Status401Unauthorized);
         }).RequireAuthorization();
 
+        // Rotates only the personal DEK (master password unchanged) — see
+        // docs/features/encryption-key-management.md "Rotazione DEK". Unlike a master-password
+        // change, no session revocation: the KEK never changes, so no other session's ability to
+        // unlock the vault is affected — only its in-memory DEK goes stale until its next login.
+        app.MapPost("/api/auth/rotate-dek", (RotateDekRequest request, IDekRotationService service, ITenantContext tenantContext, CancellationToken ct) =>
+            VaultCoreEndpointHelpers.ExecuteAsync(async () =>
+            {
+                await service.RotateDekAsync(tenantContext.UserId!.Value, request, ct);
+                return Results.NoContent();
+            })).RequireAuthorization();
+
         // "Logout remoto" (docs/features/authentication.md): lists/revokes the caller's own
         // refresh-token sessions. Revoking a session blocks future silent renewal via /refresh, but
         // an already-issued access token remains valid until its own short expiry (15 min) —
