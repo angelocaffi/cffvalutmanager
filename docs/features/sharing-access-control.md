@@ -46,7 +46,16 @@ Scope minimo (vault di organizzazione, stesso tenant) implementato per Fase 1.
 
 **Fix di sicurezza (Fase 2, F-HIGH-1)**: `InviteAsync`/`RevokeAsync` verificavano solo che il vault appartenesse allo stesso tenant del chiamante, non che il chiamante fosse effettivamente un membro attivo del vault stesso — un Admin dello stesso tenant ma estraneo al vault poteva quindi auto-invitarsi (o revocare membri) su qualunque vault organizzativo del tenant. Corretto riusando `VaultAccessGuard.GetAccessibleVaultAsync` (lo stesso controllo già applicato a `VaultItemService`/`FolderService`/`TagService`) anche qui, così il chiamante deve avere una membership attiva con permesso `ReadWrite` per invitare o revocare. 3 nuovi test di regressione — vedi [../security-model.md#stato-revisione-sicurezza](../security-model.md#stato-revisione-sicurezza).
 
-Da fare: pagine Blazor (`Web.Client`) per creare/gestire vault di organizzazione e membership, generazione della coppia di chiavi lato client (al momento non esiste alcun client che la generi — `User.PublicKey`/`EncryptedPrivateKey` restano `null` finché non viene costruito — è lo stesso prerequisito bloccante anche per la condivisione live di singola voce, vedi sotto). Ruoli fini oltre Read/ReadWrite per i vault di organizzazione restano backlog v2/Fase 4.
+Da fare: pagine Blazor (`Web.Client`) per creare/gestire vault di organizzazione e membership (la generazione della coppia di chiavi lato client, prerequisito bloccante, è ora implementata — vedi sotto). Ruoli fini oltre Read/ReadWrite per i vault di organizzazione restano backlog v2/Fase 4.
+
+## Generazione della coppia di chiavi X25519 (prerequisito, implementato)
+
+Fino a questo punto nessun client generava mai `User.PublicKey`/`EncryptedPrivateKey`: restavano sempre `null`, rendendo la condivisione (vault di organizzazione o singola voce) inutilizzabile in pratica nonostante lo schema crittografico e gli endpoint esistessero già. Risolto con:
+
+- `POST /api/auth/keypair` (autenticato) — imposta la coppia di chiavi **una sola volta**: un secondo tentativo restituisce `409`, perché rigenerarla orfanizzerebbe qualunque wrap già fatto per la chiave pubblica precedente (nessuna rotazione ancora prevista). `GET /api/auth/me` espone ora anche `HasKeyPair`.
+- `Web.Client`: nuovo `KeyPairProvisioningService`, risolto eagerly all'avvio come `TokenRefreshScheduler` — si sottoscrive a `SessionState.Changed` e, al primo sblocco della sessione, controlla `HasKeyPair`; se assente genera la coppia (`IAsymmetricKeyExchangeService.GenerateKeyPair()`, non ancora registrato in `Web.Client` prima d'ora), cifra la chiave privata con la DEK di sessione (stesso schema di qualunque altro secret dell'utente) e la carica. Silenzioso e best-effort: un fallimento transitorio non interrompe l'uso dell'app, viene ritentato al prossimo sblocco.
+
+Verificato dal vivo in un browser reale: dopo il login, `GET /api/auth/me` seguito da `POST /api/auth/keypair` (204) osservati sulla rete reale; chiave pubblica (32 byte) e chiave privata cifrata (61 byte = 1 versione + 12 nonce + 32 chiave + 16 tag, `EncryptedBlob` reale) confermate nel database. 6 nuovi test (3 Infrastructure + 3 Api; 417 in totale nella solution).
 
 ## Link di condivisione esterna (Fase 4, implementato)
 
