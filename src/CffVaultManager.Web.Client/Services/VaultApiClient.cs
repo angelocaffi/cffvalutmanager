@@ -42,6 +42,16 @@ public sealed class VaultApiClient
     public async Task<IReadOnlyList<TagResponse>> ListTagsAsync(Guid vaultId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<IReadOnlyList<TagResponse>>($"/api/vaults/{vaultId}/tags", JsonOptions, ct) ?? [];
 
+    public async Task<TagResponse> CreateTagAsync(Guid vaultId, string name, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync($"/api/vaults/{vaultId}/tags", new { Name = name }, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TagResponse>(JsonOptions, ct))!;
+    }
+
+    public Task<HttpResponseMessage> AssignTagAsync(Guid vaultId, Guid itemId, Guid tagId, CancellationToken ct = default) =>
+        _http.PostAsync($"/api/vaults/{vaultId}/items/{itemId}/tags/{tagId}", content: null, ct);
+
     // ---- Items ----------------------------------------------------------------------------
 
     public async Task<IReadOnlyList<VaultItemResponse>> ListItemsAsync(Guid vaultId, CancellationToken ct = default) =>

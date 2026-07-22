@@ -1,0 +1,232 @@
+@page "/vault/{VaultId:guid}/backup"
+@attribute [Authorize]
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Forms
+@using CffVaultManager.Web.Client.Models
+@inject VaultApiClient VaultApi
+@inject FileDownloadJsInterop FileDownload
+
+<PageTitle>Backup vault</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Backup vault</h1>
+    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Torna al vault</a>
+</div>
+
+<div class="card mb-4" style="max-width: 40rem;">
+    <div class="card-body">
+        <h2 class="h5">Esporta</h2>
+        <p class="text-body-secondary small">
+            Scarica un file con tutte le voci, cartelle e tag di questo vault. Ogni voce resta
+            cifrata esattamente come sul server (AES-256-GCM con la chiave del vault): il file non
+            viene mai decifrato né ri-cifrato da questa pagina, è solo riassemblato. Per questo è
+            reimportabile solo in questo stesso account — un file esportato da un altro account
+            non sarebbe leggibile.
+        </p>
+        <button type="button" class="btn btn-info" disabled="@_busy" @onclick="ExportAsync">
+            @if (_busy)
+            {
+                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+            }
+            Esporta backup
+        </button>
+    </div>
+</div>
+
+<div class="card" style="max-width: 40rem;">
+    <div class="card-body">
+        <h2 class="h5">Importa</h2>
+        <p class="text-body-secondary small">
+            Carica un file di backup esportato da questo stesso account. Cartelle e tag con lo
+            stesso nome vengono riusati invece di duplicati; le voci vengono sempre aggiunte come
+            nuove (non sovrascrivono voci esistenti).
+        </p>
+        <InputFile OnChange="ImportAsync" accept=".json" disabled="@_busy" class="form-control" />
+
+        @if (_importSummary is not null)
+        {
+            <div class="alert alert-success py-2 mt-3" role="alert">@_importSummary</div>
+        }
+    </div>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger py-2 mt-3" style="max-width: 40rem;" role="alert">@_errorMessage</div>
+}
+
+@code {
+    [Parameter]
+    public Guid VaultId { get; set; }
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+
+    private bool _busy;
+    private string? _errorMessage;
+    private string? _importSummary;
+
+    private async Task ExportAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var vaults = await VaultApi.ListVaultsAsync();
+            string vaultName = vaults.FirstOrDefault(v => v.Id == VaultId)?.Name ?? "vault";
+
+            var folders = await VaultApi.ListFoldersAsync(VaultId);
+            var tags = await VaultApi.ListTagsAsync(VaultId);
+            var items = await VaultApi.ListItemsAsync(VaultId);
+
+            var backup = new VaultBackupFile(
+                FormatVersion: 1,
+                ExportedAt: DateTimeOffset.UtcNow,
+                VaultName: vaultName,
+                Folders: [.. folders.Select(f => new VaultBackupFolder(f.Id, f.Name))],
+                Tags: [.. tags.Select(t => new VaultBackupTag(t.Id, t.Name))],
+                Items: [.. items.Select(i => new VaultBackupItem(i.Type, i.EncryptedPayload, i.FolderId, i.IsFavorite, i.TagIds))]);
+
+            string json = JsonSerializer.Serialize(backup, JsonOptions);
+            string filename = $"cffvaultmanager-backup-{vaultName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.json";
+            await FileDownload.DownloadAsync(filename, json);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ImportAsync(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _importSummary = null;
+        _busy = true;
+        try
+        {
+            VaultBackupFile? backup;
+            using (var stream = e.File.OpenReadStream(maxAllowedSize: 20_000_000))
+            using (var reader = new StreamReader(stream))
+            {
+                string json = await reader.ReadToEndAsync();
+                backup = JsonSerializer.Deserialize<VaultBackupFile>(json, JsonOptions);
+            }
+
+            if (backup is null || backup.FormatVersion != 1)
+            {
+                _errorMessage = "File di backup non valido o formato non supportato.";
+                return;
+            }
+
+            var folderIdMap = await ImportFoldersAsync(backup.Folders);
+            var tagIdMap = await ImportTagsAsync(backup.Tags);
+
+            int itemsImported = 0;
+            int itemsFailed = 0;
+            foreach (var item in backup.Items)
+            {
+                Guid? mappedFolderId = item.FolderId is { } folderId && folderIdMap.TryGetValue(folderId, out var newFolderId)
+                    ? newFolderId
+                    : null;
+
+                var (success, created, _) = await VaultApi.CreateItemAsync(
+                    VaultId, item.Type, item.EncryptedPayload, mappedFolderId, item.IsFavorite);
+
+                if (!success || created is null)
+                {
+                    itemsFailed++;
+                    continue;
+                }
+
+                foreach (var oldTagId in item.TagIds)
+                {
+                    if (tagIdMap.TryGetValue(oldTagId, out var newTagId))
+                    {
+                        await VaultApi.AssignTagAsync(VaultId, created.Id, newTagId);
+                    }
+                }
+
+                itemsImported++;
+            }
+
+            _importSummary = $"{itemsImported} voci importate" +
+                (itemsFailed > 0 ? $", {itemsFailed} non riuscite" : string.Empty) +
+                $", {folderIdMap.Count} cartelle e {tagIdMap.Count} tag riusati/creati.";
+        }
+        catch (JsonException)
+        {
+            _errorMessage = "Il file selezionato non è un backup CffVaultManager valido.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<Dictionary<Guid, Guid>> ImportFoldersAsync(IReadOnlyList<VaultBackupFolder> folders)
+    {
+        var existing = await VaultApi.ListFoldersAsync(VaultId);
+        var map = new Dictionary<Guid, Guid>();
+
+        foreach (var folder in folders)
+        {
+            var match = existing.FirstOrDefault(f => f.Name == folder.Name);
+            if (match is not null)
+            {
+                map[folder.Id] = match.Id;
+                continue;
+            }
+
+            try
+            {
+                var created = await VaultApi.CreateFolderAsync(VaultId, folder.Name);
+                map[folder.Id] = created.Id;
+            }
+            catch (HttpRequestException)
+            {
+                // Name conflict (e.g. a re-run of a partially-completed import) — fall back to
+                // whatever now exists under that name rather than aborting the whole import.
+                existing = await VaultApi.ListFoldersAsync(VaultId);
+                var retried = existing.FirstOrDefault(f => f.Name == folder.Name);
+                if (retried is not null)
+                {
+                    map[folder.Id] = retried.Id;
+                }
+            }
+        }
+
+        return map;
+    }
+
+    private async Task<Dictionary<Guid, Guid>> ImportTagsAsync(IReadOnlyList<VaultBackupTag> tags)
+    {
+        var existing = await VaultApi.ListTagsAsync(VaultId);
+        var map = new Dictionary<Guid, Guid>();
+
+        foreach (var tag in tags)
+        {
+            var match = existing.FirstOrDefault(t => t.Name == tag.Name);
+            if (match is not null)
+            {
+                map[tag.Id] = match.Id;
+                continue;
+            }
+
+            try
+            {
+                var created = await VaultApi.CreateTagAsync(VaultId, tag.Name);
+                map[tag.Id] = created.Id;
+            }
+            catch (HttpRequestException)
+            {
+                existing = await VaultApi.ListTagsAsync(VaultId);
+                var retried = existing.FirstOrDefault(t => t.Name == tag.Name);
+                if (retried is not null)
+                {
+                    map[tag.Id] = retried.Id;
+                }
+            }
+        }
+
+        return map;
+    }
+}

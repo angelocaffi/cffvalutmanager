@@ -38,6 +38,7 @@ builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<AuditApiClient>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
+builder.Services.AddScoped<FileDownloadJsInterop>();
 builder.Services.AddScoped<TokenRefreshScheduler>();
 
 var host = builder.Build();

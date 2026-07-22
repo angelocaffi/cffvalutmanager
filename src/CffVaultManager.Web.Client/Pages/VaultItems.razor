@@ -38,7 +38,8 @@
         <option value="@VaultItemTypes.SecureNote">Note sicure</option>
         <option value="@VaultItemTypes.GenericSecret">Secret generici</option>
     </select>
-    <a class="btn btn-outline-secondary ms-auto" href="@($"/vault/{VaultId}/trash")">Cestino</a>
+    <a class="btn btn-outline-secondary ms-auto" href="@($"/vault/{VaultId}/backup")">Backup</a>
+    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}/trash")">Cestino</a>
 </div>
 
 @if (_errorMessage is not null)
