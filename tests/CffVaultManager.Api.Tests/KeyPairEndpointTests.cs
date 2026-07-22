@@ -58,6 +58,35 @@ public sealed class KeyPairEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GET_keypair_before_any_is_set_returns_404()
+    {
+        string token = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+
+        var response = await GetAuthorizedAsync("/api/auth/keypair", token);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GET_keypair_after_it_is_set_returns_what_was_uploaded()
+    {
+        string token = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        byte[] publicKey = RandomBytes(32);
+        byte[] encryptedPrivateKey = RandomBytes(64);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAuthorizedAsync(HttpMethod.Post, "/api/auth/keypair", token, new
+        {
+            PublicKey = publicKey,
+            EncryptedPrivateKey = encryptedPrivateKey,
+        })).StatusCode);
+
+        var response = await GetAuthorizedAsync("/api/auth/keypair", token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(Convert.ToBase64String(publicKey), body.RootElement.GetProperty("publicKey").GetString());
+        Assert.Equal(Convert.ToBase64String(encryptedPrivateKey), body.RootElement.GetProperty("encryptedPrivateKey").GetString());
+    }
+
+    [Fact]
     public async Task POST_keypair_a_second_time_returns_409()
     {
         string token = await ProvisionAndLoginAsync("acme", "admin@acme.test");

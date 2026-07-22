@@ -88,6 +88,21 @@ internal static class AuthEndpoints
             return Results.NoContent();
         }).RequireAuthorization();
 
+        // Returns the caller's own keypair so their client can unwrap something wrapped for them
+        // (e.g. a shared item's key) — safe to return EncryptedPrivateKey to its own owner, since
+        // only they hold the DEK it's encrypted with.
+        app.MapGet("/api/auth/keypair", async (IKeyPairService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await service.GetOwnKeyPairAsync(tenantContext.UserId!.Value, ct));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).RequireAuthorization();
+
         app.MapPost("/api/auth/refresh", async (RefreshRequest request, IAuthenticationService auth, HttpContext http, CancellationToken ct) =>
         {
             var result = await auth.RefreshAsync(request.RefreshToken, ClientIp(http), UserAgent(http), ct);

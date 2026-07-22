@@ -57,6 +57,33 @@ public sealed class KeyPairServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetOwnKeyPairAsync_before_any_keypair_is_set_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => new KeyPairService(ctx).GetOwnKeyPairAsync(adminId));
+    }
+
+    [Fact]
+    public async Task GetOwnKeyPairAsync_returns_what_was_set()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        byte[] publicKey = RandomBytes(32);
+        byte[] encryptedPrivateKey = RandomBytes(64);
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new KeyPairService(ctx).SetKeyPairAsync(adminId, publicKey, encryptedPrivateKey);
+        }
+
+        using var ctx2 = CreateContext(Tenant(tenantId, adminId));
+        var dto = await new KeyPairService(ctx2).GetOwnKeyPairAsync(adminId);
+        Assert.Equal(publicKey, dto.PublicKey);
+        Assert.Equal(encryptedPrivateKey, dto.EncryptedPrivateKey);
+    }
+
+    [Fact]
     public async Task SetKeyPairAsync_a_second_time_throws_InvalidOperationException()
     {
         var (tenantId, adminId, _) = await ProvisionAsync();
