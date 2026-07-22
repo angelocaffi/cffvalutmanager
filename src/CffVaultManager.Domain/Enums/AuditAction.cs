@@ -30,4 +30,6 @@ public enum AuditAction
     WebAuthnCredentialRemoved,
     ExternalShareLinkCreated,
     ExternalShareLinkRevoked,
+    ItemMembershipGranted,
+    ItemMembershipRevoked,
 }

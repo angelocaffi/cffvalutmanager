@@ -35,6 +35,27 @@ internal static class VaultMembershipsEndpoints
             }
         }).RequireAuthorization();
 
+        // Same lookup, keyed by email instead of user id — used to find a per-item share
+        // recipient (see docs/features/sharing-access-control.md), where the sharer knows the
+        // recipient's email but not their id.
+        app.MapGet("/api/tenant/users/by-email/{email}/public-key", async (
+            string email, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                var dto = await service.GetPublicKeyByEmailAsync(email, tenantContext.TenantId!.Value, ct);
+                return Results.Ok(dto);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.UnprocessableEntity(new { error = ex.Message });
+            }
+        }).RequireAuthorization();
+
         var group = app.MapGroup("/api/vaults/{vaultId:guid}/memberships").RequireAuthorization();
 
         // Only tenant Admins manage org-vault membership (see docs/roadmap.md Fase 1 scope).

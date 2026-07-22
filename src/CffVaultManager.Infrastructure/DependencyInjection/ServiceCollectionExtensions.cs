@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuditLogRetentionService, AuditLogRetentionService>();
         services.AddHostedService<AuditLogRetentionHostedService>();
         services.AddScoped<IExternalShareLinkService, ExternalShareLinkService>();
+        services.AddScoped<IItemMembershipService, ItemMembershipService>();
 
         return services;
     }

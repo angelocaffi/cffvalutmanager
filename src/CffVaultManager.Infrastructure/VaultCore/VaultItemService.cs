@@ -53,7 +53,8 @@ internal sealed class VaultItemService : IVaultItemService
         await _db.SaveChangesAsync(ct);
 
         var tagIds = await _db.VaultItemTags.Where(t => t.VaultItemId == itemId).Select(t => t.TagId).ToListAsync(ct);
-        return ToDto(item, tagIds);
+        var mySharedAccess = await GetMySharedAccessAsync(itemId, callerId, ct);
+        return ToDto(item, tagIds, mySharedAccess);
     }
 
     public async Task<IReadOnlyList<VaultItemDto>> ListAsync(Guid vaultId, Guid callerId, VaultItemListQuery query, CancellationToken ct = default)
@@ -91,6 +92,8 @@ internal sealed class VaultItemService : IVaultItemService
             i.CreatedAt, i.UpdatedAt, i.LastAccessedAt, i.IsDeleted, i.DeletedAt))
             .ToListAsync(ct);
 
+        items = await WithMySharedAccessAsync(items, callerId, ct);
+
         IEnumerable<VaultItemDto> ordered = (query.SortBy, query.Direction) switch
         {
             (VaultItemSortBy.CreatedAt, SortDirection.Ascending) => items.OrderBy(i => i.CreatedAt),
@@ -115,6 +118,8 @@ internal sealed class VaultItemService : IVaultItemService
                 i.VaultItemTags.Select(t => t.TagId).ToList(),
                 i.CreatedAt, i.UpdatedAt, i.LastAccessedAt, i.IsDeleted, i.DeletedAt))
             .ToListAsync(ct);
+
+        items = await WithMySharedAccessAsync(items, callerId, ct);
 
         return items.OrderByDescending(i => i.DeletedAt).ToList();
     }
@@ -147,7 +152,8 @@ internal sealed class VaultItemService : IVaultItemService
         await _db.SaveChangesAsync(ct);
 
         var tagIds = await _db.VaultItemTags.Where(t => t.VaultItemId == itemId).Select(t => t.TagId).ToListAsync(ct);
-        return ToDto(item, tagIds);
+        var mySharedAccess = await GetMySharedAccessAsync(itemId, callerId, ct);
+        return ToDto(item, tagIds, mySharedAccess);
     }
 
     public async Task SoftDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
@@ -252,7 +258,46 @@ internal sealed class VaultItemService : IVaultItemService
     private void WriteAudit(Guid tenantId, Guid callerId, AuditAction action, Guid vaultItemId) =>
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), tenantId, callerId, action, vaultItemId));
 
-    private static VaultItemDto ToDto(VaultItem item, IReadOnlyList<Guid> tagIds) => new(
+    private static VaultItemDto ToDto(VaultItem item, IReadOnlyList<Guid> tagIds, SharedAccessDto? mySharedAccess = null) => new(
         item.Id, item.Type, item.EncryptedPayload, item.FolderId, item.IsFavorite, tagIds,
-        item.CreatedAt, item.UpdatedAt, item.LastAccessedAt, item.IsDeleted, item.DeletedAt);
+        item.CreatedAt, item.UpdatedAt, item.LastAccessedAt, item.IsDeleted, item.DeletedAt, mySharedAccess);
+
+    /// <summary>
+    /// Non-null only once the item has been shared (see docs/features/sharing-access-control.md):
+    /// tells the caller's client whether to decrypt/encrypt with a per-item key instead of the
+    /// vault's DEK, and if so, their own wrap of it.
+    /// </summary>
+    private async Task<SharedAccessDto?> GetMySharedAccessAsync(Guid itemId, Guid callerId, CancellationToken ct) =>
+        await _db.ItemMemberships
+            .Where(m => m.VaultItemId == itemId && m.UserId == callerId && m.RevokedAt == null)
+            .Select(m => new SharedAccessDto(m.Permission, m.WrappedItemKey, m.EphemeralPublicKey))
+            .FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// Batched version of <see cref="GetMySharedAccessAsync"/> for a list of items — a single
+    /// extra query instead of one per item, then merged in memory (kept out of the main EF Core
+    /// projection: a correlated subquery there is riskier to translate consistently across
+    /// providers, and this codebase already prefers materialize-then-merge for that reason).
+    /// </summary>
+    private async Task<List<VaultItemDto>> WithMySharedAccessAsync(List<VaultItemDto> items, Guid callerId, CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return items;
+        }
+
+        var itemIds = items.Select(i => i.Id).ToList();
+        var accessByItemId = await _db.ItemMemberships
+            .Where(m => itemIds.Contains(m.VaultItemId) && m.UserId == callerId && m.RevokedAt == null)
+            .ToDictionaryAsync(m => m.VaultItemId, m => new SharedAccessDto(m.Permission, m.WrappedItemKey, m.EphemeralPublicKey), ct);
+
+        if (accessByItemId.Count == 0)
+        {
+            return items;
+        }
+
+        return items
+            .Select(i => accessByItemId.TryGetValue(i.Id, out var access) ? i with { MySharedAccess = access } : i)
+            .ToList();
+    }
 }

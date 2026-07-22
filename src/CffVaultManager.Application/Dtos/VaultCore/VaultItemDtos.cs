@@ -17,7 +17,17 @@ public sealed record VaultItemDto(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? LastAccessedAt,
     bool IsDeleted,
-    DateTimeOffset? DeletedAt);
+    DateTimeOffset? DeletedAt,
+    /// <summary>
+    /// Non-null only once this item has been shared (see docs/features/sharing-access-control.md
+    /// "Condivisione live di singola voce"): from that point on the item is encrypted with a
+    /// dedicated per-item key, not the vault's DEK, so the caller — including the item's own
+    /// owner — must unwrap this to know which key to decrypt/encrypt with.
+    /// </summary>
+    SharedAccessDto? MySharedAccess = null);
+
+/// <summary>The caller's own wrap of a shared item's dedicated key. Opaque to the server.</summary>
+public sealed record SharedAccessDto(ItemSharePermission Permission, byte[] WrappedItemKey, byte[] EphemeralPublicKey);
 
 public sealed record CreateVaultItemRequest(
     VaultItemType Type,

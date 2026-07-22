@@ -19,6 +19,13 @@ public interface IVaultMembershipService
     Task<PublicKeyDto> GetPublicKeyAsync(Guid targetUserId, Guid callerId, Guid callerTenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// Same as <see cref="GetPublicKeyAsync"/>, looked up by email instead of user id — used to
+    /// find a per-item share recipient (see docs/features/sharing-access-control.md), where the
+    /// sharer knows the recipient's email but not their id.
+    /// </summary>
+    Task<PublicKeyDto> GetPublicKeyByEmailAsync(string email, Guid callerTenantId, CancellationToken ct = default);
+
+    /// <summary>
     /// Grants a same-tenant user access to an organization vault, storing the client-provided
     /// wrapped DEK. The vault must be an organization vault the caller (an Admin) belongs to.
     /// </summary>

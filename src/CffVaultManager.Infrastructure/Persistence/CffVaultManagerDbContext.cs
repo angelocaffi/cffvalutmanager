@@ -50,6 +50,8 @@ public class CffVaultManagerDbContext : DbContext
 
     public DbSet<ExternalShareLink> ExternalShareLinks => Set<ExternalShareLink>();
 
+    public DbSet<ItemMembership> ItemMemberships => Set<ItemMembership>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Configurations whose global query filter reads the current tenant take this
@@ -70,5 +72,6 @@ public class CffVaultManagerDbContext : DbContext
         modelBuilder.ApplyConfiguration(new WebAuthnCredentialConfiguration());
         modelBuilder.ApplyConfiguration(new WebAuthnCeremonyConfiguration());
         modelBuilder.ApplyConfiguration(new ExternalShareLinkConfiguration(this));
+        modelBuilder.ApplyConfiguration(new ItemMembershipConfiguration(this));
     }
 }
