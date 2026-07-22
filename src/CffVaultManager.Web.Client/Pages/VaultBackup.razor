@@ -2,9 +2,12 @@
 @attribute [Authorize]
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
+@using CffVaultManager.Crypto.Abstractions
 @using CffVaultManager.Web.Client.Models
 @inject VaultApiClient VaultApi
 @inject FileDownloadJsInterop FileDownload
+@inject SessionState Session
+@inject IAeadCipherService AeadCipher
 
 <PageTitle>Backup vault</PageTitle>
 
@@ -50,6 +53,113 @@
     </div>
 </div>
 
+<div class="card mt-4" style="max-width: 40rem;">
+    <div class="card-body">
+        <h2 class="h5">Importa da CSV</h2>
+        <p class="text-body-secondary small">
+            Migra le password da Chrome, Bitwarden o LastPass. Il formato viene riconosciuto
+            automaticamente dalle intestazioni del file; se non viene riconosciuto potrai indicare
+            tu quale colonna corrisponde a quale campo. Il file viene letto solo in questo browser:
+            ogni voce viene cifrata qui prima di essere inviata al server, mai in chiaro. Solo le
+            password vengono importate (non note sicure, carte o identità); le voci vengono sempre
+            aggiunte come nuove.
+        </p>
+        <InputFile OnChange="OnCsvFileSelectedAsync" accept=".csv" disabled="@_busy" class="form-control" />
+
+        @if (_csvHeader is not null && _csvVendor is CsvVendor.Unknown)
+        {
+            <div class="alert alert-warning py-2 mt-3" role="alert">
+                Formato non riconosciuto automaticamente. Indica a quale colonna del file corrisponde ciascun campo.
+            </div>
+            <div class="row row-cols-2 g-2 mt-1">
+                <div>
+                    <label class="form-label small mb-0">Titolo (obbligatorio)</label>
+                    <select class="form-select form-select-sm" @bind="_mapTitle">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small mb-0">Password (obbligatorio)</label>
+                    <select class="form-select form-select-sm" @bind="_mapPassword">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small mb-0">Username</label>
+                    <select class="form-select form-select-sm" @bind="_mapUsername">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small mb-0">URL</label>
+                    <select class="form-select form-select-sm" @bind="_mapUrl">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small mb-0">Note</label>
+                    <select class="form-select form-select-sm" @bind="_mapNotes">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small mb-0">Cartella</label>
+                    <select class="form-select form-select-sm" @bind="_mapFolder">
+                        <option value="-1">-- nessuna --</option>
+                        @for (int i = 0; i < _csvHeader.Length; i++)
+                        {
+                            <option value="@i">@_csvHeader[i]</option>
+                        }
+                    </select>
+                </div>
+            </div>
+        }
+        else if (_csvVendor is { } vendor && vendor != CsvVendor.Unknown && _csvRows is not null)
+        {
+            <div class="alert alert-info py-2 mt-3" role="alert">
+                Formato riconosciuto: <strong>@VendorLabel(vendor)</strong>. @_csvRows.Count voci pronte per l'import
+                (esempio: @string.Join(", ", _csvRows.Take(3).Select(r => r.Title))@(_csvRows.Count > 3 ? ", …" : "")).
+            </div>
+        }
+
+        @if (_csvHeader is not null)
+        {
+            <button type="button" class="btn btn-info mt-2" disabled="@(_busy || !CanImportCsv())" @onclick="ImportCsvAsync">
+                @if (_busy)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                }
+                Conferma import
+            </button>
+        }
+
+        @if (_csvImportSummary is not null)
+        {
+            <div class="alert alert-success py-2 mt-3" role="alert">@_csvImportSummary</div>
+        }
+    </div>
+</div>
+
 @if (_errorMessage is not null)
 {
     <div class="alert alert-danger py-2 mt-3" style="max-width: 40rem;" role="alert">@_errorMessage</div>
@@ -64,6 +174,19 @@
     private bool _busy;
     private string? _errorMessage;
     private string? _importSummary;
+
+    private string[]? _csvHeader;
+    private string[][]? _csvDataRows;
+    private CsvVendor? _csvVendor;
+    private List<CsvImportRow>? _csvRows;
+    private string? _csvImportSummary;
+
+    private int _mapTitle = -1;
+    private int _mapPassword = -1;
+    private int _mapUsername = -1;
+    private int _mapUrl = -1;
+    private int _mapNotes = -1;
+    private int _mapFolder = -1;
 
     private async Task ExportAsync()
     {
@@ -229,4 +352,184 @@
 
         return map;
     }
+
+    // ---- CSV import (Chrome/Bitwarden/LastPass, Password entries only) ----------------------
+
+    private async Task OnCsvFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _csvImportSummary = null;
+        _csvHeader = null;
+        _csvDataRows = null;
+        _csvVendor = null;
+        _csvRows = null;
+        _mapTitle = _mapPassword = _mapUsername = _mapUrl = _mapNotes = _mapFolder = -1;
+
+        string text;
+        using (var stream = e.File.OpenReadStream(maxAllowedSize: 20_000_000))
+        using (var reader = new StreamReader(stream))
+        {
+            text = await reader.ReadToEndAsync();
+        }
+
+        var table = CsvParser.Parse(text);
+        if (table.Count == 0)
+        {
+            _errorMessage = "Il file CSV è vuoto o non leggibile.";
+            return;
+        }
+
+        _csvHeader = table[0];
+        _csvDataRows = [.. table.Skip(1)];
+        _csvVendor = CsvParser.Detect(_csvHeader);
+
+        if (_csvVendor != CsvVendor.Unknown)
+        {
+            _csvRows = [.. _csvDataRows
+                .Select(row => CsvParser.MapRow(_csvVendor.Value, _csvHeader, row))
+                .OfType<CsvImportRow>()];
+        }
+    }
+
+    private bool CanImportCsv() => _csvVendor switch
+    {
+        CsvVendor.Unknown => _mapTitle >= 0 && _mapPassword >= 0,
+        not null => _csvRows is { Count: > 0 },
+        null => false,
+    };
+
+    private async Task ImportCsvAsync()
+    {
+        if (_csvHeader is null || _csvDataRows is null)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _csvImportSummary = null;
+        _busy = true;
+        try
+        {
+            byte[] dek = Session.RequireDek();
+            var rows = _csvVendor == CsvVendor.Unknown ? BuildManualCsvRows() : _csvRows ?? [];
+
+            var folderNames = rows
+                .Select(r => r.Folder)
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(f => f!)
+                .Distinct()
+                .ToList();
+            var folderMap = await ImportFolderNamesAsync(folderNames);
+
+            int imported = 0;
+            int failed = 0;
+            int skipped = 0;
+            foreach (var row in rows)
+            {
+                if (string.IsNullOrWhiteSpace(row.Title) && string.IsNullOrWhiteSpace(row.Password))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var model = new PasswordFormModel
+                {
+                    Title = string.IsNullOrWhiteSpace(row.Title) ? "(senza titolo)" : row.Title,
+                    Username = row.Username ?? string.Empty,
+                    Password = row.Password ?? string.Empty,
+                    Url = row.Url ?? string.Empty,
+                    Notes = row.Notes ?? string.Empty,
+                };
+
+                byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(model.ToPayload());
+                byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, dek).ToBytes();
+
+                Guid? folderId = row.Folder is { } folderName && folderMap.TryGetValue(folderName, out var id) ? id : null;
+                var (success, _, _) = await VaultApi.CreateItemAsync(VaultId, VaultItemTypes.Password, encryptedPayload, folderId, isFavorite: false);
+                if (success)
+                {
+                    imported++;
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            _csvImportSummary = $"{imported} voci importate" +
+                (failed > 0 ? $", {failed} non riuscite" : string.Empty) +
+                (skipped > 0 ? $", {skipped} righe vuote ignorate" : string.Empty) +
+                $", {folderMap.Count} cartelle create/riusate. " +
+                "Elimina ora il file CSV dal tuo dispositivo: contiene le password in chiaro.";
+
+            _csvHeader = null;
+            _csvDataRows = null;
+            _csvVendor = null;
+            _csvRows = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private List<CsvImportRow> BuildManualCsvRows()
+    {
+        if (_csvDataRows is null)
+        {
+            return [];
+        }
+
+        return [.. _csvDataRows.Select(row => new CsvImportRow(
+            Title: ColumnValue(row, _mapTitle) ?? string.Empty,
+            Username: ColumnValue(row, _mapUsername),
+            Password: ColumnValue(row, _mapPassword),
+            Url: ColumnValue(row, _mapUrl),
+            Notes: ColumnValue(row, _mapNotes),
+            Folder: ColumnValue(row, _mapFolder)))];
+    }
+
+    private static string? ColumnValue(string[] row, int index) =>
+        index >= 0 && index < row.Length && !string.IsNullOrWhiteSpace(row[index]) ? row[index] : null;
+
+    private async Task<Dictionary<string, Guid>> ImportFolderNamesAsync(IReadOnlyList<string> names)
+    {
+        var existing = await VaultApi.ListFoldersAsync(VaultId);
+        var map = new Dictionary<string, Guid>();
+
+        foreach (var name in names)
+        {
+            var match = existing.FirstOrDefault(f => f.Name == name);
+            if (match is not null)
+            {
+                map[name] = match.Id;
+                continue;
+            }
+
+            try
+            {
+                var created = await VaultApi.CreateFolderAsync(VaultId, name);
+                map[name] = created.Id;
+            }
+            catch (HttpRequestException)
+            {
+                existing = await VaultApi.ListFoldersAsync(VaultId);
+                var retried = existing.FirstOrDefault(f => f.Name == name);
+                if (retried is not null)
+                {
+                    map[name] = retried.Id;
+                }
+            }
+        }
+
+        return map;
+    }
+
+    private static string VendorLabel(CsvVendor vendor) => vendor switch
+    {
+        CsvVendor.Chrome => "Chrome",
+        CsvVendor.Bitwarden => "Bitwarden",
+        CsvVendor.LastPass => "LastPass",
+        _ => "sconosciuto",
+    };
 }
