@@ -1,6 +1,6 @@
 # Condivisione e controllo accessi
 
-> Stato: **parzialmente promossa a MVP** dal modello multi-tenant — vedi nota sotto. Il caso base "vault di organizzazione condiviso tra i membri di un tenant" è necessario da subito; condivisioni ad-hoc tra singoli utenti restano backlog v2. Fase 4 (condivisione granulare di singola voce) in corso: il link di condivisione esterna (verso chi non ha un account) è implementato — vedi "Link di condivisione esterna" più sotto; la condivisione live tra utenti dello stesso tenant (ruoli owner/editor/viewer) resta da fare.
+> Stato: **parzialmente promossa a MVP** dal modello multi-tenant — vedi nota sotto. Il caso base "vault di organizzazione condiviso tra i membri di un tenant" è necessario da subito; condivisioni ad-hoc tra singoli utenti restano backlog v2. Fase 4 (condivisione granulare di singola voce): link di condivisione esterna, generazione keypair e backend della condivisione live tra utenti dello stesso tenant sono implementati — vedi le sezioni dedicate più sotto. Resta da fare solo l'interfaccia Blazor per la condivisione live (il backend è già completo e testato).
 
 ## Nota — impatto della multi-tenancy
 
@@ -56,6 +56,35 @@ Fino a questo punto nessun client generava mai `User.PublicKey`/`EncryptedPrivat
 - `Web.Client`: nuovo `KeyPairProvisioningService`, risolto eagerly all'avvio come `TokenRefreshScheduler` — si sottoscrive a `SessionState.Changed` e, al primo sblocco della sessione, controlla `HasKeyPair`; se assente genera la coppia (`IAsymmetricKeyExchangeService.GenerateKeyPair()`, non ancora registrato in `Web.Client` prima d'ora), cifra la chiave privata con la DEK di sessione (stesso schema di qualunque altro secret dell'utente) e la carica. Silenzioso e best-effort: un fallimento transitorio non interrompe l'uso dell'app, viene ritentato al prossimo sblocco.
 
 Verificato dal vivo in un browser reale: dopo il login, `GET /api/auth/me` seguito da `POST /api/auth/keypair` (204) osservati sulla rete reale; chiave pubblica (32 byte) e chiave privata cifrata (61 byte = 1 versione + 12 nonce + 32 chiave + 16 tag, `EncryptedBlob` reale) confermate nel database. 6 nuovi test (3 Infrastructure + 3 Api; 417 in totale nella solution).
+
+## Condivisione live di singola voce (Fase 4, backend implementato)
+
+A differenza dei vault (dove la DEK è del vault, una sola chiave per tutte le voci), condividere una singola voce senza dare accesso a tutto il vault richiede una chiave dedicata alla voce stessa. Scelta di design: **promozione lazy** — una voce resta cifrata con la DEK del vault finché non viene condivisa per la prima volta; solo a quel punto passa a una chiave dedicata (`ItemMembership.WrappedItemKey`), wrappata con lo stesso schema ECIES X25519+HKDF-SHA256+AES-256-GCM già usato per `VaultMembership`. Da quel momento **anche il proprietario** ha bisogno di una propria riga `ItemMembership` (Permission=`Owner`) per continuare a decifrare la voce: non torna mai più alla DEK del vault, nemmeno se tutti i destinatari vengono revocati (evita la complessità di un "de-promuovere" per un caso limite raro).
+
+**Modello dati**: nuova entità `ItemMembership` [tenant-scoped] — mirror quasi verbatim di `VaultMembership` ma per `VaultItemId` invece di `VaultId`: `Permission` (nuovo enum `ItemSharePermission { Viewer, Editor, Owner }`, distinto da `VaultPermission` che resta solo per i vault), `WrappedItemKey`, `EphemeralPublicKey`, `InvitedByUserId`, `RevokedAt`. Indice unique filtrato `(TenantId, VaultItemId, UserId) WHERE RevokedAt IS NULL`.
+
+**Controllo accessi**: nuovo `ItemAccessGuard`, deliberatamente **non collegato** a `VaultAccessGuard` — un membro `ReadWrite` del vault che contiene la voce non ha automaticamente voce in capitolo sulla condivisione di quella specifica voce se non è lui stesso il suo `Owner` per-voce; un destinatario può avere accesso alla voce senza avere alcun accesso al vault che la contiene. La prima condivisione (`ShareAsync`) resta invece un'operazione **vault-level**: richiede `ReadWrite` sul vault via `VaultAccessGuard` (la voce non è ancora promossa, quindi non esiste ancora nessuna `ItemMembership` da controllare).
+
+**Permessi**: solo l'**Owner** può invitare altri membri o revocarli (più restrittivo del modello a livello vault, dove qualunque membro `ReadWrite` può farlo — per una singola voce ha più senso restringere a chi l'ha condivisa per primo). L'**Editor** può leggere e riscrivere il ciphertext (stessa chiave, nessuna rotazione per una modifica normale). Il **Viewer** solo leggere.
+
+**Ricerca destinatario per email**: nuovo `GET /api/tenant/users/by-email/{email}/public-key` (stesso schema anti-enumerazione di quello esistente per userId) — deliberatamente non un elenco/directory di tutti gli utenti del tenant, per non costruire una feature "user directory" non richiesta.
+
+**Endpoint**:
+```
+POST /api/vaults/{vaultId}/items/{itemId}/share       (prima condivisione, richiede ReadWrite sul vault)
+POST /api/items/{itemId}/memberships                  (aggiungi un altro destinatario, solo Owner)
+POST /api/items/{itemId}/memberships/{userId}/revoke  (solo Owner, ruota la chiave — stesso pattern esatto di RevokeAsync sui vault)
+GET  /api/items/{itemId}/memberships                  (qualunque membro attivo)
+GET  /api/shared-items                                (feed "condivisi con me" — esclude le voci di cui si è Owner, già visibili nel proprio vault)
+GET  /api/shared-items/{itemId}                       (una voce condivisa, risolta solo tramite la membership del chiamante — nessun vaultId coinvolto)
+PUT  /api/shared-items/{itemId}                       (Editor o Owner)
+```
+
+**Nessuna modifica al comportamento esistente di `VaultItemService`**: sia l'endpoint normale (`PUT /api/vaults/{vaultId}/items/{itemId}`, usato dal proprietario) sia quello per i destinatari salvano/restituiscono byte opachi — il server non sa né gli interessa quale chiave li ha cifrati. L'unica modifica, additiva, è un nuovo campo opzionale `MySharedAccess` nel `VaultItemDto` esistente (popolato da una query aggiuntiva su `ItemMemberships`, batch per `ListAsync`/`ListTrashAsync`, singola per `GetAsync`/`UpdateAsync`): dice al client del proprietario se e con quale chiave decifrare, senza toccare nessun'altra riga di logica del servizio già esistente e ben testato.
+
+Da fare: interfaccia Blazor (`Web.Client`) — bottone "Condividi con un utente" sulla pagina della voce, branch nel percorso di decifratura/cifratura di `VaultItemDetail.razor` per usare `MySharedAccess` quando presente, pagina "Condivisi con me", mini-UI di gestione membri.
+
+63 nuovi test (20 Infrastructure + 8 Api; 445 in totale nella solution). Non ancora verificato dal vivo in browser (nessuna UI): la verifica end-to-end reale avverrà a UI completata.
 
 ## Link di condivisione esterna (Fase 4, implementato)
 

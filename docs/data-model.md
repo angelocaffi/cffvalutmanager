@@ -153,6 +153,25 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | VaultId | FK |
 | Name | in chiaro (metadato di organizzazione, non sensibile) |
 
+## ItemMembership **[tenant-scoped]**
+
+Accesso di un utente a una singola voce condivisa (vedi [features/sharing-access-control.md](features/sharing-access-control.md#condivisione-live-di-singola-voce-fase-4-backend-implementato)), indipendente dal vault che la contiene. Mirror di `VaultMembership` a livello di voce invece che di vault: la chiave della voce non esiste mai come colonna cifrata unica, solo come N copie indipendenti (una per membro attivo, proprietario incluso) qui.
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant (denormalizzato) |
+| VaultItemId | FK a VaultItem |
+| UserId | FK a User |
+| Permission | enum `ItemSharePermission`: `Viewer`, `Editor`, `Owner` (distinto da `VaultPermission`, che resta solo per i vault) |
+| WrappedItemKey | **[cifrato]** — chiave della voce cifrata per questo membro (AES-256-GCM con chiave derivata via ECDH+HKDF) |
+| EphemeralPublicKey | chiave pubblica X25519 effimera del mittente usata per questo specifico wrapping |
+| InvitedByUserId | FK a User |
+| CreatedAt | |
+| RevokedAt | nullable — la riga resta per audit anche dopo la revoca |
+
+> Nota: indice univoco filtrato `(TenantId, VaultItemId, UserId) WHERE RevokedAt IS NULL` — al più una membership attiva per utente per voce.
+
 ## ExternalShareLink **[tenant-scoped]**
 
 Link di condivisione a scadenza verso una singola voce, per chi non ha un account (vedi [features/sharing-access-control.md](features/sharing-access-control.md#link-di-condivisione-esterna-fase-4-implementato)). `EncryptedPayload` è uno snapshot cifrato con una chiave monouso che non lascia mai il browser del proprietario — il server non la vede né la deriva.
@@ -177,7 +196,7 @@ Link di condivisione a scadenza verso una singola voce, per chi non ha un accoun
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved`, `ExternalShareLinkCreated`, `ExternalShareLinkRevoked` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved`, `ExternalShareLinkCreated`, `ExternalShareLinkRevoked`, `ItemMembershipGranted`, `ItemMembershipRevoked` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
@@ -193,6 +212,7 @@ User 1---N WebAuthnCeremony
 VaultItem N---N Tag
 Vault 1---N VaultMembership N---1 User (solo vault di organizzazione)
 VaultItem 1---N ExternalShareLink
+VaultItem 1---N ItemMembership N---1 User
 ```
 
 ## Note di implementazione
