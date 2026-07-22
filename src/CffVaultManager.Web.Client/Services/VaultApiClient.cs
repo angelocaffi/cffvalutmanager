@@ -128,7 +128,16 @@ public sealed record VaultItemResponse(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? LastAccessedAt,
     bool IsDeleted,
-    DateTimeOffset? DeletedAt);
+    DateTimeOffset? DeletedAt,
+    /// <summary>
+    /// Non-null only once this item has been shared (see docs/features/sharing-access-control.md):
+    /// from that point on it's encrypted with a dedicated per-item key, not the vault's DEK, so
+    /// even its own owner must unwrap this to know which key to decrypt/encrypt with.
+    /// </summary>
+    SharedAccessResponse? MySharedAccess = null);
+
+/// <summary>The caller's own wrap of a shared item's dedicated key. Opaque to the server. Permission is one of "Viewer"/"Editor"/"Owner".</summary>
+public sealed record SharedAccessResponse(string Permission, byte[] WrappedItemKey, byte[] EphemeralPublicKey);
 
 /// <summary>Vault item type discriminator — kept as a plain string (not a shared enum type) since Web.Client cannot reference CffVaultManager.Domain.</summary>
 public static class VaultItemTypes

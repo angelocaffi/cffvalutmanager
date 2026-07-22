@@ -8,6 +8,7 @@
 @inject SessionState Session
 @inject IAeadCipherService AeadCipher
 @inject NavigationManager Navigation
+@inject ItemKeyResolver ItemKeyResolver
 
 <PageTitle>Vault</PageTitle>
 
@@ -113,7 +114,12 @@ else
         _summaries.Clear();
         foreach (var item in _items)
         {
-            _summaries[item.Id] = Summarize(item, dek);
+            // Once an item has been shared it's encrypted with its own dedicated key, not the
+            // vault's DEK — see docs/features/sharing-access-control.md.
+            byte[] key = item.MySharedAccess is { } access
+                ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
+                : dek;
+            _summaries[item.Id] = Summarize(item, key);
         }
     }
 

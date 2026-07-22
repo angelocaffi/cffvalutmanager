@@ -11,6 +11,8 @@
 @inject SessionState Session
 @inject IAeadCipherService AeadCipher
 @inject NavigationManager Navigation
+@inject ItemSharingApiClient ItemSharingApi
+@inject ItemKeyResolver ItemKeyResolver
 
 <PageTitle>@(_isNew ? "Nuova voce" : "Modifica voce")</PageTitle>
 
@@ -78,6 +80,74 @@ else
             }
         </div>
     </form>
+
+    @if (!_isNew)
+    {
+        <div class="card mt-4" style="max-width: 32rem;">
+            <div class="card-body">
+                <h2 class="h5">Condivisione</h2>
+
+                @if (_mySharedAccess is null)
+                {
+                    <p class="text-body-secondary small">Questa voce non è ancora condivisa con nessuno.</p>
+                }
+                else
+                {
+                    <p class="text-body-secondary small">Il tuo ruolo su questa voce: <strong>@PermissionLabel(_mySharedAccess.Permission)</strong>.</p>
+
+                    @if (_members.Count > 0)
+                    {
+                        <ul class="list-group mb-3">
+                            @foreach (var m in _members)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span class="small font-monospace">@m.UserId @(m.UserId == _ownerId ? "(tu)" : "")</span>
+                                    <span class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-secondary">@PermissionLabel(m.Permission)</span>
+                                        @if (_mySharedAccess.Permission == "Owner" && m.UserId != _ownerId)
+                                        {
+                                            <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_shareBusy" @onclick="() => RevokeMemberAsync(m.UserId)">Revoca</button>
+                                        }
+                                    </span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+
+                @if (_mySharedAccess is null || _mySharedAccess.Permission == "Owner")
+                {
+                    <div class="mb-2">
+                        <label class="form-label">Email destinatario</label>
+                        <input class="form-control" @bind="_shareEmail" disabled="@_shareBusy" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Permesso</label>
+                        <select class="form-select" style="max-width: 12rem;" @bind="_sharePermission">
+                            <option value="Viewer">Sola lettura</option>
+                            <option value="Editor">Modifica</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-info btn-sm" disabled="@_shareBusy" @onclick="ShareOrAddMemberAsync">
+                        @if (_shareBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Condividi con un utente
+                    </button>
+                }
+
+                @if (_shareError is not null)
+                {
+                    <div class="alert alert-danger py-2 mt-2" role="alert">@_shareError</div>
+                }
+                @if (_shareSuccess is not null)
+                {
+                    <div class="alert alert-success py-2 mt-2" role="alert">@_shareSuccess</div>
+                }
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -108,6 +178,18 @@ else
     // value into PasswordHistory (docs/features/password-manager.md) — never set for a new item.
     private string? _originalPassword;
 
+    // ---- Sharing (see docs/features/sharing-access-control.md "Condivisione live di singola voce") ----
+    // Non-null only once this specific item has been shared: from that point on it's encrypted
+    // with its own dedicated key (not the vault's DEK), even for its own owner.
+    private SharedAccessResponse? _mySharedAccess;
+    private IReadOnlyList<ItemMembershipResponse> _members = [];
+    private Guid _ownerId;
+    private bool _shareBusy;
+    private string _shareEmail = string.Empty;
+    private string _sharePermission = "Viewer";
+    private string? _shareError;
+    private string? _shareSuccess;
+
     protected override async Task OnParametersSetAsync()
     {
         _errorMessage = null;
@@ -121,7 +203,14 @@ else
                 _effectiveType = item.Type;
                 _isFavorite = item.IsFavorite;
                 _folderId = item.FolderId;
-                DecryptInto(item);
+                _mySharedAccess = item.MySharedAccess;
+                await DecryptIntoAsync(item);
+
+                if (_mySharedAccess is not null)
+                {
+                    _members = await ItemSharingApi.ListMembersAsync(id);
+                    _ownerId = _members.FirstOrDefault(m => m.Permission == "Owner")?.UserId ?? Guid.Empty;
+                }
             }
             else
             {
@@ -129,6 +218,8 @@ else
                 _effectiveType = Type ?? VaultItemTypes.Password;
                 _isFavorite = false;
                 _folderId = null;
+                _mySharedAccess = null;
+                _members = [];
                 _passwordModel = new PasswordFormModel();
                 _creditCardModel = new CreditCardFormModel();
                 _cryptoWalletModel = new CryptoWalletFormModel();
@@ -143,13 +234,15 @@ else
         }
     }
 
-    private void DecryptInto(VaultItemResponse item)
+    private async Task DecryptIntoAsync(VaultItemResponse item)
     {
-        byte[] dek = Session.RequireDek();
         try
         {
+            byte[] key = item.MySharedAccess is { } access
+                ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
+                : Session.RequireDek();
             var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
-            byte[] plaintext = AeadCipher.Decrypt(blob, dek);
+            byte[] plaintext = AeadCipher.Decrypt(blob, key);
 
             if (item.Type == VaultItemTypes.Password)
             {
@@ -186,35 +279,17 @@ else
         _busy = true;
         try
         {
-            byte[] dek = Session.RequireDek();
-            byte[] plaintext;
-            if (_effectiveType == VaultItemTypes.Password)
-            {
-                plaintext = SerializePassword();
-            }
-            else if (_effectiveType == VaultItemTypes.CreditCard)
-            {
-                plaintext = JsonSerializer.SerializeToUtf8Bytes(_creditCardModel.ToPayload());
-            }
-            else if (_effectiveType == VaultItemTypes.CryptoWallet)
-            {
-                plaintext = JsonSerializer.SerializeToUtf8Bytes(_cryptoWalletModel.ToPayload());
-            }
-            else if (_effectiveType == VaultItemTypes.SecureNote)
-            {
-                plaintext = JsonSerializer.SerializeToUtf8Bytes(_secureNoteModel.ToPayload());
-            }
-            else if (_effectiveType == VaultItemTypes.GenericSecret)
-            {
-                plaintext = JsonSerializer.SerializeToUtf8Bytes(_genericSecretModel.ToPayload());
-            }
-            else
+            byte[]? plaintext = SerializeCurrentPlaintext();
+            if (plaintext is null)
             {
                 _errorMessage = $"Tipo di voce non supportato: {_effectiveType}.";
                 return;
             }
 
-            byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, dek).ToBytes();
+            byte[] key = _mySharedAccess is { } access
+                ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
+                : Session.RequireDek();
+            byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, key).ToBytes();
 
             if (_isNew)
             {
@@ -222,6 +297,18 @@ else
                 if (!success)
                 {
                     _errorMessage = error;
+                    return;
+                }
+            }
+            else if (_mySharedAccess is not null)
+            {
+                // A shared item's Type/FolderId/IsFavorite aren't editable through this path (the
+                // owner still uses the normal vault-scoped route for those — this only covers the
+                // ciphertext, the one thing a shared item's payload actually is).
+                var response = await ItemSharingApi.UpdateSharedItemAsync(ItemId!.Value, encryptedPayload);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _errorMessage = "Impossibile salvare la voce.";
                     return;
                 }
             }
@@ -243,6 +330,16 @@ else
         }
     }
 
+    private byte[]? SerializeCurrentPlaintext() => _effectiveType switch
+    {
+        VaultItemTypes.Password => SerializePassword(),
+        VaultItemTypes.CreditCard => JsonSerializer.SerializeToUtf8Bytes(_creditCardModel.ToPayload()),
+        VaultItemTypes.CryptoWallet => JsonSerializer.SerializeToUtf8Bytes(_cryptoWalletModel.ToPayload()),
+        VaultItemTypes.SecureNote => JsonSerializer.SerializeToUtf8Bytes(_secureNoteModel.ToPayload()),
+        VaultItemTypes.GenericSecret => JsonSerializer.SerializeToUtf8Bytes(_genericSecretModel.ToPayload()),
+        _ => null,
+    };
+
     private byte[] SerializePassword()
     {
         if (!_isNew && _originalPassword is not null && _originalPassword != _passwordModel.Password)
@@ -252,6 +349,151 @@ else
 
         return JsonSerializer.SerializeToUtf8Bytes(_passwordModel.ToPayload());
     }
+
+    private async Task ShareOrAddMemberAsync()
+    {
+        if (ItemId is not { } itemId || string.IsNullOrWhiteSpace(_shareEmail))
+        {
+            return;
+        }
+
+        _shareError = null;
+        _shareSuccess = null;
+        _shareBusy = true;
+        try
+        {
+            byte[]? recipientPublicKey = await ItemSharingApi.GetPublicKeyByEmailAsync(_shareEmail);
+            if (recipientPublicKey is null)
+            {
+                _shareError = "Utente non trovato o senza una coppia di chiavi generata.";
+                return;
+            }
+
+            if (_mySharedAccess is null)
+            {
+                // First share: promote the item to a dedicated key.
+                byte[]? plaintext = SerializeCurrentPlaintext();
+                if (plaintext is null)
+                {
+                    _shareError = $"Tipo di voce non supportato: {_effectiveType}.";
+                    return;
+                }
+
+                byte[] itemKey = RandomNumberGenerator.GetBytes(CryptoConstants.KeyLengthBytes);
+                byte[] reencryptedPayload = AeadCipher.Encrypt(plaintext, itemKey).ToBytes();
+
+                byte[] ownPublicKey = await ItemKeyResolver.GetOwnPublicKeyAsync();
+                var (ownerEph, ownerWrap) = ItemKeyResolver.Wrap(ownPublicKey, itemKey);
+                var (recipientEph, recipientWrap) = ItemKeyResolver.Wrap(recipientPublicKey, itemKey);
+
+                var (success, _, error) = await ItemSharingApi.ShareAsync(
+                    VaultId, itemId, _shareEmail, _sharePermission, reencryptedPayload,
+                    ownerWrap, ownerEph, recipientWrap, recipientEph);
+
+                if (!success)
+                {
+                    _shareError = error;
+                    return;
+                }
+
+                _mySharedAccess = new SharedAccessResponse("Owner", ownerWrap, ownerEph);
+            }
+            else
+            {
+                if (_mySharedAccess.Permission != "Owner")
+                {
+                    _shareError = "Solo il proprietario può aggiungere altri destinatari.";
+                    return;
+                }
+
+                byte[] itemKey = await ItemKeyResolver.UnwrapAsync(_mySharedAccess.WrappedItemKey, _mySharedAccess.EphemeralPublicKey);
+                var (recipientEph, recipientWrap) = ItemKeyResolver.Wrap(recipientPublicKey, itemKey);
+
+                var (success, _, error) = await ItemSharingApi.AddMemberAsync(itemId, _shareEmail, _sharePermission, recipientWrap, recipientEph);
+                if (!success)
+                {
+                    _shareError = error;
+                    return;
+                }
+            }
+
+            _members = await ItemSharingApi.ListMembersAsync(itemId);
+            _ownerId = _members.FirstOrDefault(m => m.Permission == "Owner")?.UserId ?? Guid.Empty;
+            _shareSuccess = "Voce condivisa correttamente.";
+            _shareEmail = string.Empty;
+        }
+        finally
+        {
+            _shareBusy = false;
+        }
+    }
+
+    private async Task RevokeMemberAsync(Guid userId)
+    {
+        if (ItemId is not { } itemId)
+        {
+            return;
+        }
+
+        _shareError = null;
+        _shareSuccess = null;
+        _shareBusy = true;
+        try
+        {
+            byte[]? plaintext = SerializeCurrentPlaintext();
+            if (plaintext is null)
+            {
+                _shareError = $"Tipo di voce non supportato: {_effectiveType}.";
+                return;
+            }
+
+            byte[] newItemKey = RandomNumberGenerator.GetBytes(CryptoConstants.KeyLengthBytes);
+            byte[] reencryptedPayload = AeadCipher.Encrypt(plaintext, newItemKey).ToBytes();
+
+            var remaining = _members.Where(m => m.UserId != userId).ToList();
+            var newMemberships = new List<NewItemMembershipRequest>();
+            foreach (var member in remaining)
+            {
+                byte[]? publicKey = await ItemSharingApi.GetPublicKeyByUserIdAsync(member.UserId);
+                if (publicKey is null)
+                {
+                    _shareError = "Impossibile recuperare la chiave pubblica di un membro rimanente.";
+                    return;
+                }
+
+                var (eph, wrapped) = ItemKeyResolver.Wrap(publicKey, newItemKey);
+                newMemberships.Add(new NewItemMembershipRequest(member.UserId, wrapped, eph));
+            }
+
+            var (success, error) = await ItemSharingApi.RevokeAsync(itemId, userId, reencryptedPayload, newMemberships);
+            if (!success)
+            {
+                _shareError = error;
+                return;
+            }
+
+            var mine = newMemberships.FirstOrDefault(m => m.UserId == _ownerId);
+            if (mine is not null)
+            {
+                _mySharedAccess = new SharedAccessResponse("Owner", mine.WrappedItemKey, mine.EphemeralPublicKey);
+            }
+
+            _members = await ItemSharingApi.ListMembersAsync(itemId);
+            _shareSuccess = "Accesso revocato.";
+        }
+        finally
+        {
+            _shareBusy = false;
+        }
+    }
+
+    private static string PermissionLabel(string permission) => permission switch
+    {
+        "Viewer" => "Sola lettura",
+        "Editor" => "Modifica",
+        "Owner" => "Proprietario",
+        _ => permission,
+    };
 
     private async Task RecordRevealAsync()
     {

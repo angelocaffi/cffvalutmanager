@@ -38,6 +38,8 @@ builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<AuditApiClient>();
 builder.Services.AddScoped<ShareLinkApiClient>();
+builder.Services.AddScoped<ItemSharingApiClient>();
+builder.Services.AddScoped<ItemKeyResolver>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<FileDownloadJsInterop>();

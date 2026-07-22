@@ -123,6 +123,15 @@ public sealed class AuthApiClient
         return response.IsSuccessStatusCode;
     }
 
+    /// <summary>The caller's own keypair, needed to unwrap something wrapped for them (e.g. a shared item's key). Null if none has been generated yet.</summary>
+    public async Task<KeyPairResponse?> GetKeyPairAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/api/auth/keypair", ct);
+        return response.IsSuccessStatusCode
+            ? await response.Content.ReadFromJsonAsync<KeyPairResponse>(JsonOptions, ct)
+            : null;
+    }
+
     /// <summary>
     /// Enables Email OTP as an MFA factor. Fails with a 409-derived message if the account's
     /// email has never been verified — the server refuses to send codes to an unproven address.
@@ -216,6 +225,8 @@ public sealed record LoginResponse(
     CryptoMaterialsResponse? CryptoMaterials);
 
 public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled, bool HasKeyPair);
+
+public sealed record KeyPairResponse(byte[] PublicKey, byte[] EncryptedPrivateKey);
 
 public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 

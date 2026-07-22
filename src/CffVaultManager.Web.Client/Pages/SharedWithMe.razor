@@ -1,0 +1,63 @@
+@page "/shared-with-me"
+@attribute [Authorize]
+@inject ItemSharingApiClient ItemSharingApi
+
+<PageTitle>Condivisi con me</PageTitle>
+
+<h1 class="h3 mb-4">Condivisi con me</h1>
+
+@if (_loading)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_items.Count == 0)
+{
+    <p class="text-body-secondary">Nessuna voce condivisa con te al momento.</p>
+}
+else
+{
+    <div class="list-group" style="max-width: 40rem;">
+        @foreach (var item in _items)
+        {
+            <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+               href="@($"/shared-items/{item.Id}")">
+                <span>@TypeLabel(item.Type)</span>
+                <span class="badge bg-secondary">@PermissionLabel(item.MyPermission)</span>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private IReadOnlyList<SharedItemResponse> _items = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await ItemSharingApi.GetSharedWithMeAsync();
+        _loading = false;
+    }
+
+    // Deliberately does not resolve the item's decrypted title — same choice already made for
+    // Activity.razor's audit feed: it would require decrypting every item just to render a list,
+    // and type + permission is already enough to identify and open the right one.
+    private static string TypeLabel(string type) => type switch
+    {
+        VaultItemTypes.Password => "Password",
+        VaultItemTypes.CreditCard => "Carta di credito",
+        VaultItemTypes.CryptoWallet => "Crypto wallet",
+        VaultItemTypes.SecureNote => "Nota sicura",
+        VaultItemTypes.GenericSecret => "Secret generico",
+        _ => type,
+    };
+
+    private static string PermissionLabel(string permission) => permission switch
+    {
+        "Viewer" => "Sola lettura",
+        "Editor" => "Modifica",
+        _ => permission,
+    };
+}

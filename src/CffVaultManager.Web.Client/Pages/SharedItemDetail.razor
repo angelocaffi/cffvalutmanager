@@ -1,0 +1,242 @@
+@page "/shared-items/{ItemId:guid}"
+@attribute [Authorize]
+@using System.Security.Cryptography
+@using System.Text.Json
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@inject ItemSharingApiClient ItemSharingApi
+@inject ItemKeyResolver ItemKeyResolver
+@inject IAeadCipherService AeadCipher
+@inject ClipboardJsInterop Clipboard
+
+<PageTitle>Voce condivisa</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Voce condivisa</h1>
+    <a class="btn btn-outline-secondary" href="/shared-with-me">Torna all'elenco</a>
+</div>
+
+@if (_loading)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_errorMessage is not null)
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+}
+else
+{
+    <div class="mb-3">
+        <span class="badge bg-secondary">@PermissionLabel(_myPermission)</span>
+        @if (IsReadOnly)
+        {
+            <span class="text-body-secondary small ms-2">Sola lettura: non puoi modificare questa voce.</span>
+        }
+    </div>
+
+    <div style="max-width: 32rem;">
+        @if (_type == VaultItemTypes.Password)
+        {
+            <div class="mb-3">
+                <label class="form-label">Titolo</label>
+                <input class="form-control" @bind="_passwordModel.Title" @bind:event="oninput" disabled="@(IsReadOnly || _busy)" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Username / Email</label>
+                <input class="form-control" @bind="_passwordModel.Username" @bind:event="oninput" disabled="@(IsReadOnly || _busy)" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <div class="input-group">
+                    <input type="@(_passwordRevealed ? "text" : "password")" class="form-control"
+                           @bind="_passwordModel.Password" @bind:event="oninput" disabled="@(IsReadOnly || _busy)" />
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _passwordRevealed = !_passwordRevealed">
+                        @(_passwordRevealed ? "Nascondi" : "Mostra")
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CopyPasswordAsync">Copia</button>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">URL</label>
+                <input class="form-control" @bind="_passwordModel.Url" @bind:event="oninput" disabled="@(IsReadOnly || _busy)" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Note</label>
+                <textarea class="form-control" rows="3" @bind="_passwordModel.Notes" @bind:event="oninput" disabled="@(IsReadOnly || _busy)"></textarea>
+            </div>
+        }
+        else if (_type == VaultItemTypes.CreditCard)
+        {
+            <CreditCardFields Model="_creditCardModel" Disabled="@(IsReadOnly || _busy)" OnRevealSensitiveField="NoOpAsync" />
+        }
+        else if (_type == VaultItemTypes.CryptoWallet)
+        {
+            <CryptoWalletFields Model="_cryptoWalletModel" Disabled="@(IsReadOnly || _busy)" OnRevealSensitiveField="NoOpAsync" />
+        }
+        else if (_type == VaultItemTypes.SecureNote)
+        {
+            <SecureNoteFields Model="_secureNoteModel" Disabled="@(IsReadOnly || _busy)" />
+        }
+        else if (_type == VaultItemTypes.GenericSecret)
+        {
+            <GenericSecretFields Model="_genericSecretModel" Disabled="@(IsReadOnly || _busy)" />
+        }
+
+        @if (!IsReadOnly)
+        {
+            <button type="button" class="btn btn-info" disabled="@_busy" @onclick="SaveAsync">
+                @if (_busy)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                }
+                @(_busy ? "Salvataggio…" : "Salva")
+            </button>
+        }
+
+        @if (_saveError is not null)
+        {
+            <div class="alert alert-danger py-2 mt-3" role="alert">@_saveError</div>
+        }
+        @if (_saveSuccess is not null)
+        {
+            <div class="alert alert-success py-2 mt-3" role="alert">@_saveSuccess</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid ItemId { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _passwordRevealed;
+    private string? _errorMessage;
+    private string? _saveError;
+    private string? _saveSuccess;
+
+    private string _type = string.Empty;
+    private string _myPermission = string.Empty;
+    private bool IsReadOnly => _myPermission == "Viewer";
+    private byte[] _itemKey = [];
+
+    private PasswordFormModel _passwordModel = new();
+    private CreditCardFormModel _creditCardModel = new();
+    private CryptoWalletFormModel _cryptoWalletModel = new();
+    private SecureNoteFormModel _secureNoteModel = new();
+    private GenericSecretFormModel _genericSecretModel = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _errorMessage = null;
+        _loading = true;
+        try
+        {
+            var shared = await ItemSharingApi.GetSharedItemAsync(ItemId);
+            if (shared is null)
+            {
+                _errorMessage = "Voce non trovata: potrebbe essere stata revocata.";
+                return;
+            }
+
+            _type = shared.Type;
+            _myPermission = shared.MyPermission;
+
+            try
+            {
+                _itemKey = await ItemKeyResolver.UnwrapAsync(shared.MyWrappedItemKey, shared.MyEphemeralPublicKey);
+                var blob = EncryptedBlob.FromBytes(shared.EncryptedPayload);
+                byte[] plaintext = AeadCipher.Decrypt(blob, _itemKey);
+
+                if (_type == VaultItemTypes.Password)
+                {
+                    _passwordModel = PasswordFormModel.FromPayload(JsonSerializer.Deserialize<PasswordPayload>(plaintext)!);
+                }
+                else if (_type == VaultItemTypes.CreditCard)
+                {
+                    _creditCardModel = CreditCardFormModel.FromPayload(JsonSerializer.Deserialize<CreditCardPayload>(plaintext)!);
+                }
+                else if (_type == VaultItemTypes.CryptoWallet)
+                {
+                    _cryptoWalletModel = CryptoWalletFormModel.FromPayload(JsonSerializer.Deserialize<CryptoWalletPayload>(plaintext)!);
+                }
+                else if (_type == VaultItemTypes.SecureNote)
+                {
+                    _secureNoteModel = SecureNoteFormModel.FromPayload(JsonSerializer.Deserialize<SecureNotePayload>(plaintext)!);
+                }
+                else if (_type == VaultItemTypes.GenericSecret)
+                {
+                    _genericSecretModel = GenericSecretFormModel.FromPayload(JsonSerializer.Deserialize<GenericSecretPayload>(plaintext)!);
+                }
+            }
+            catch (CryptographicException)
+            {
+                _errorMessage = "Impossibile decifrare questa voce (chiave errata o dato corrotto).";
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+        _saveSuccess = null;
+        _busy = true;
+        try
+        {
+            byte[]? plaintext = _type switch
+            {
+                VaultItemTypes.Password => JsonSerializer.SerializeToUtf8Bytes(_passwordModel.ToPayload()),
+                VaultItemTypes.CreditCard => JsonSerializer.SerializeToUtf8Bytes(_creditCardModel.ToPayload()),
+                VaultItemTypes.CryptoWallet => JsonSerializer.SerializeToUtf8Bytes(_cryptoWalletModel.ToPayload()),
+                VaultItemTypes.SecureNote => JsonSerializer.SerializeToUtf8Bytes(_secureNoteModel.ToPayload()),
+                VaultItemTypes.GenericSecret => JsonSerializer.SerializeToUtf8Bytes(_genericSecretModel.ToPayload()),
+                _ => null,
+            };
+
+            if (plaintext is null)
+            {
+                _saveError = $"Tipo di voce non supportato: {_type}.";
+                return;
+            }
+
+            byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, _itemKey).ToBytes();
+            var response = await ItemSharingApi.UpdateSharedItemAsync(ItemId, encryptedPayload);
+            if (!response.IsSuccessStatusCode)
+            {
+                _saveError = "Impossibile salvare la voce.";
+                return;
+            }
+
+            _saveSuccess = "Voce salvata.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyPasswordAsync()
+    {
+        if (!string.IsNullOrEmpty(_passwordModel.Password))
+        {
+            await Clipboard.CopyWithAutoClearAsync(_passwordModel.Password);
+        }
+    }
+
+    private static Task NoOpAsync() => Task.CompletedTask;
+
+    private static string PermissionLabel(string permission) => permission switch
+    {
+        "Viewer" => "Sola lettura",
+        "Editor" => "Modifica",
+        _ => permission,
+    };
+}

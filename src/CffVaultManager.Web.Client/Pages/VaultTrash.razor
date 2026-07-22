@@ -7,6 +7,7 @@
 @inject VaultApiClient VaultApi
 @inject SessionState Session
 @inject IAeadCipherService AeadCipher
+@inject ItemKeyResolver ItemKeyResolver
 
 <PageTitle>Cestino</PageTitle>
 
@@ -76,7 +77,12 @@ else
         _titles.Clear();
         foreach (var item in _items)
         {
-            _titles[item.Id] = TryGetTitle(item, dek);
+            // Once an item has been shared it's encrypted with its own dedicated key, not the
+            // vault's DEK — see docs/features/sharing-access-control.md.
+            byte[] key = item.MySharedAccess is { } access
+                ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
+                : dek;
+            _titles[item.Id] = TryGetTitle(item, key);
         }
     }
 
