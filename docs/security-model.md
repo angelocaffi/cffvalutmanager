@@ -56,6 +56,7 @@ Singoli secrets (password, carte, note) — persistiti come ciphertext + nonce +
 
 - Se in futuro si integrano pagamenti reali, valutare la conformità **PCI-DSS**; per un vault "personal", i dati carta sono trattati come qualunque altro secret cifrato, mai trasmessi a processori di pagamento.
 - Il PAN (numero carta) va sempre mascherato in UI di default (mostra ultime 4 cifre), con "reveal" esplicito che richiede ri-autenticazione o conferma.
+- **Decisione: nessun alert server-side di scadenza carta** (vedi [features/notifications.md](features/notifications.md), [features/credit-cards.md](features/credit-cards.md)). La data di scadenza vive solo dentro `EncryptedPayload`; per notificare "la tua carta sta per scadere" il server dovrebbe conoscere quella data in chiaro (o un campo separato non cifrato con la stessa informazione), il che equivale a fargli vedere una parte del secret — in contrasto diretto con il principio di zero-knowledge (vedi CLAUDE.md, principio 1). Non esiste un meccanismo lato client praticabile che eviti questo senza introdurre un canale non cifrato ad hoc, quindi la feature è stata scartata, non solo rimandata.
 
 ## Eccezione controllata: controllo password compromesse (k-anonymity)
 

@@ -30,7 +30,7 @@ Ogni feature ha un documento dedicato con: scopo, requisiti funzionali, requisit
 | [Password health / security dashboard](password-health.md) | Password deboli, riutilizzate, compromesse | Backlog |
 | [Import / export](import-export.md) | Migrazione da altri password manager, backup cifrato | Backlog |
 | [Condivisione e controllo accessi](sharing-access-control.md) | Condivisione singola voce, ruoli fini (owner/editor/viewer) | Backlog |
-| [Notifiche](notifications.md) | Scadenza carte, alert breach, promemoria | Backlog |
+| [Notifiche](notifications.md) | Alert di sicurezza (email), promemoria password compromesse | Backlog |
 
 ## Come aggiungere una nuova feature
 
