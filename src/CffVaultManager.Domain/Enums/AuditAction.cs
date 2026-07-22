@@ -28,4 +28,6 @@ public enum AuditAction
     MfaEmailOtpDisabled,
     WebAuthnCredentialRegistered,
     WebAuthnCredentialRemoved,
+    ExternalShareLinkCreated,
+    ExternalShareLinkRevoked,
 }

@@ -53,5 +53,19 @@ public sealed class RateLimitingTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task GET_public_share_link_returns_429_after_the_per_ip_limit_is_exceeded_within_the_window()
+    {
+        // Same policy as login (see ExternalShareLinkEndpoints) — token brute-forcing is exactly
+        // the scenario this rate limiter exists for.
+        HttpResponseMessage? last = null;
+        for (int i = 0; i < 11; i++)
+        {
+            last = await _client.GetAsync("/api/share-links/nonexistent-token");
+        }
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, last!.StatusCode);
+    }
+
     private static byte[] RandomBytes(int length) => RandomNumberGenerator.GetBytes(length);
 }

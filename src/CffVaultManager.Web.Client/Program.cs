@@ -36,9 +36,11 @@ builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().Cre
 builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<AuditApiClient>();
+builder.Services.AddScoped<ShareLinkApiClient>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<FileDownloadJsInterop>();
+builder.Services.AddScoped<UrlFragmentJsInterop>();
 builder.Services.AddScoped<TokenRefreshScheduler>();
 
 var host = builder.Build();

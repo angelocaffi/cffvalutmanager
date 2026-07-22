@@ -36,7 +36,7 @@ else
 
         @if (_effectiveType == VaultItemTypes.Password)
         {
-            <PasswordFields Model="_passwordModel" Disabled="_busy" OnRevealPassword="RecordRevealAsync" />
+            <PasswordFields Model="_passwordModel" Disabled="_busy" OnRevealPassword="RecordRevealAsync" VaultId="VaultId" ItemId="ItemId" />
         }
         else if (_effectiveType == VaultItemTypes.CreditCard)
         {

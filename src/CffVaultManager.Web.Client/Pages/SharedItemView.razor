@@ -1,0 +1,139 @@
+@page "/share/{Token}"
+@using System.Security.Cryptography
+@using System.Text.Json
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Models
+@inject ShareLinkApiClient ShareLinkApi
+@inject UrlFragmentJsInterop UrlFragment
+@inject IAeadCipherService AeadCipher
+@inject ClipboardJsInterop Clipboard
+
+<PageTitle>Voce condivisa</PageTitle>
+
+<div class="d-flex justify-content-center">
+    <div class="card mt-5" style="max-width: 30rem; width: 100%;">
+        <div class="card-body">
+            <h1 class="h4 mb-3">Voce condivisa</h1>
+
+            @if (_loading)
+            {
+                <div class="d-flex align-items-center gap-2">
+                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <span>Caricamento…</span>
+                </div>
+            }
+            else if (_errorMessage is not null)
+            {
+                <div class="alert alert-danger" role="alert">@_errorMessage</div>
+            }
+            else if (_snapshot is not null)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Titolo</label>
+                    <input class="form-control" readonly value="@_snapshot.Title" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Username / Email</label>
+                    <div class="input-group">
+                        <input class="form-control" readonly value="@_snapshot.Username" />
+                        <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(_snapshot.Username)">Copia</button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <div class="input-group">
+                        <input type="@(_passwordRevealed ? "text" : "password")" class="form-control" readonly value="@_snapshot.Password" />
+                        <button type="button" class="btn btn-outline-secondary" @onclick="() => _passwordRevealed = !_passwordRevealed">
+                            @(_passwordRevealed ? "Nascondi" : "Mostra")
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(_snapshot.Password)">Copia</button>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(_snapshot.Url))
+                {
+                    <div class="mb-3">
+                        <label class="form-label">URL</label>
+                        <input class="form-control" readonly value="@_snapshot.Url" />
+                    </div>
+                }
+                @if (_expiresAt is not null)
+                {
+                    <p class="text-body-secondary small mb-0">Link valido fino al @_expiresAt.Value.ToLocalTime().ToString("g").</p>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private bool _passwordRevealed;
+    private string? _errorMessage;
+    private SharedPasswordSnapshot? _snapshot;
+    private DateTimeOffset? _expiresAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            string hash = await UrlFragment.GetHashAsync();
+            string? keyBase64Url = ParseKeyFromHash(hash);
+            if (keyBase64Url is null)
+            {
+                _errorMessage = "Link non valido: manca la chiave di decifratura.";
+                return;
+            }
+
+            var content = await ShareLinkApi.GetByTokenAsync(Token);
+            if (content is null)
+            {
+                _errorMessage = "Questo link non è valido, è scaduto o è stato revocato.";
+                return;
+            }
+
+            byte[] key = Convert.FromBase64String(PadBase64(keyBase64Url.Replace('-', '+').Replace('_', '/')));
+            var blob = EncryptedBlob.FromBytes(content.EncryptedPayload);
+            byte[] plaintext = AeadCipher.Decrypt(blob, key);
+            _snapshot = JsonSerializer.Deserialize<SharedPasswordSnapshot>(plaintext);
+            _expiresAt = content.ExpiresAt;
+
+            if (_snapshot is null)
+            {
+                _errorMessage = "Impossibile leggere il contenuto condiviso.";
+            }
+        }
+        catch (CryptographicException)
+        {
+            _errorMessage = "Impossibile decifrare il contenuto: la chiave nel link non è corretta.";
+        }
+        catch (FormatException)
+        {
+            _errorMessage = "Link non valido.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CopyAsync(string? value)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            await Clipboard.CopyWithAutoClearAsync(value);
+        }
+    }
+
+    private static string? ParseKeyFromHash(string hash)
+    {
+        const string prefix = "key=";
+        return hash.StartsWith(prefix, StringComparison.Ordinal) ? hash[prefix.Length..] : null;
+    }
+
+    private static string PadBase64(string base64) =>
+        base64.PadRight(base64.Length + ((4 - (base64.Length % 4)) % 4), '=');
+}

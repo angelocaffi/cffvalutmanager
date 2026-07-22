@@ -111,6 +111,7 @@ app.MapVaultItemEndpoints();
 app.MapVaultMembershipEndpoints();
 app.MapAuditEndpoints();
 app.MapWebAuthnEndpoints();
+app.MapExternalShareLinkEndpoints();
 
 app.Run();
 
