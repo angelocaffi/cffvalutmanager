@@ -153,6 +153,22 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | VaultId | FK |
 | Name | in chiaro (metadato di organizzazione, non sensibile) |
 
+## ExternalShareLink **[tenant-scoped]**
+
+Link di condivisione a scadenza verso una singola voce, per chi non ha un account (vedi [features/sharing-access-control.md](features/sharing-access-control.md#link-di-condivisione-esterna-fase-4-implementato)). `EncryptedPayload` è uno snapshot cifrato con una chiave monouso che non lascia mai il browser del proprietario — il server non la vede né la deriva.
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant (denormalizzato) — la lettura pubblica bypassa comunque il filtro tenant per token (vedi doc feature) |
+| VaultItemId | FK a VaultItem |
+| CreatedByUserId | FK a User |
+| Token | stringa casuale ad alta entropia (256 bit), univoca — mai l'Id, è la chiave di lookup pubblica |
+| EncryptedPayload | **[cifrato]** — snapshot minimale (Titolo/Username/Password/URL), cifrato con una chiave monouso mai persistita |
+| ExpiresAt | configurabile dal client, clampata lato server (1 minuto — 7 giorni) |
+| CreatedAt | |
+| RevokedAt | nullable — una riga scaduta o revocata viene eliminata al primo tentativo di accesso, non conservata per audit come `VaultMembership` |
+
 ## AuditLogEntry **[tenant-scoped, tranne eventi di piattaforma SuperAdmin]**
 
 | Campo | Note |
@@ -161,7 +177,7 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved`, `ExternalShareLinkCreated`, `ExternalShareLinkRevoked` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
@@ -176,6 +192,7 @@ User 1---N WebAuthnCredential
 User 1---N WebAuthnCeremony
 VaultItem N---N Tag
 Vault 1---N VaultMembership N---1 User (solo vault di organizzazione)
+VaultItem 1---N ExternalShareLink
 ```
 
 ## Note di implementazione
