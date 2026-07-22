@@ -10,6 +10,7 @@ using Fido2NetLib;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace CffVaultManager.Infrastructure.DependencyInjection;
 
@@ -35,7 +36,27 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITotpService, TotpService>();
         services.AddSingleton<ISecretProtector, SecretProtector>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
-        services.AddSingleton<IEmailSender, LoggingEmailSender>();
+
+        // Real SMTP delivery only when a host is actually configured — same "empty string = not
+        // configured" convention already used for WebAuthn below, so local dev works out of the
+        // box without requiring an SMTP account (see docs/features/notifications.md).
+        string smtpHost = configuration["Email:SmtpHost"] ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(smtpHost))
+        {
+            services.AddSingleton<IEmailSender>(sp => new SmtpEmailSender(
+                smtpHost,
+                configuration.GetValue<int?>("Email:SmtpPort") ?? 587,
+                configuration["Email:SmtpUsername"],
+                configuration["Email:SmtpPassword"],
+                configuration.GetValue<bool?>("Email:UseStartTls") ?? true,
+                configuration["Email:FromAddress"] ?? string.Empty,
+                configuration["Email:FromDisplayName"] ?? "CffVaultManager",
+                sp.GetRequiredService<ILogger<SmtpEmailSender>>()));
+        }
+        else
+        {
+            services.AddSingleton<IEmailSender, LoggingEmailSender>();
+        }
 
         // RP ID/origins must match the origin the browser's navigator.credentials call actually
         // runs from — the Web(.Client) host, not this Api (see docs/features/authentication.md).
