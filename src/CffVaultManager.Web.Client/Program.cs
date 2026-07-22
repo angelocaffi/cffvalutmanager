@@ -19,8 +19,13 @@ builder.Services.AddSingleton<IAuthHashService, AuthHashService>();
 // All stateless and RNG-only where relevant (see docs/features/password-manager.md).
 builder.Services.AddSingleton<IPasswordGeneratorService, PasswordGeneratorService>();
 builder.Services.AddSingleton<IPasswordStrengthService, PasswordStrengthService>();
+builder.Services.AddSingleton<IPasswordReuseService, PasswordReuseService>();
 builder.Services.AddSingleton<ICardValidationService, CardValidationService>();
 builder.Services.AddSingleton<ICryptoWalletValidationService, CryptoWalletValidationService>();
+
+// Dedicated HttpClient pointed at the HIBP host, deliberately not the app's own "Api" client (no
+// bearer token, no BaseAddress override) — see docs/features/password-health.md.
+builder.Services.AddHttpClient<IBreachCheckService, HibpBreachCheckService>();
 
 builder.Services.AddSingleton<SessionState>();
 builder.Services.AddAuthorizationCore();
