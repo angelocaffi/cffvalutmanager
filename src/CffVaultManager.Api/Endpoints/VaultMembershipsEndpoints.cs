@@ -1,14 +1,15 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
-using CffVaultManager.Domain.Enums;
 
 namespace CffVaultManager.Api.Endpoints;
 
 /// <summary>
 /// Organization-vault membership management within the caller's tenant (see
-/// docs/features/sharing-access-control.md). Invite and revoke are Admin-only; any active member may
-/// list a vault's members and any authenticated user may fetch another same-tenant user's public
-/// key. Cross-tenant references surface as 404. The server only ever stores opaque wrapped-key bytes.
+/// docs/features/sharing-access-control.md). Invite and revoke require the caller to be an active
+/// Owner of the target vault (enforced in <c>VaultMembershipService</c>, not here — these routes
+/// only require authentication); any active member may list a vault's members and any authenticated
+/// user may fetch another same-tenant user's public key. Cross-tenant references surface as 404. The
+/// server only ever stores opaque wrapped-key bytes.
 /// </summary>
 internal static class VaultMembershipsEndpoints
 {
@@ -58,15 +59,15 @@ internal static class VaultMembershipsEndpoints
 
         var group = app.MapGroup("/api/vaults/{vaultId:guid}/memberships").RequireAuthorization();
 
-        // Only tenant Admins manage org-vault membership (see docs/roadmap.md Fase 1 scope).
+        // Owner-only, enforced inside VaultMembershipService.InviteAsync — not a tenant role gate.
         group.MapPost("", (Guid vaultId, CreateMembershipRequest request, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
             {
                 var membership = await service.InviteAsync(vaultId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, request, ct);
                 return Results.Created($"/api/vaults/{vaultId}/memberships/{membership.Id}", membership);
-            }))
-            .RequireAuthorization(policy => policy.RequireRole(nameof(UserRole.Admin)));
+            }));
 
+        // Owner-only, enforced inside VaultMembershipService.RevokeAsync — not a tenant role gate.
         group.MapPost("/{userId:guid}/revoke", (Guid vaultId, Guid userId, RevokeMembershipRequest request, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
             {
@@ -77,8 +78,7 @@ internal static class VaultMembershipsEndpoints
 
                 await service.RevokeAsync(vaultId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, request, ct);
                 return Results.NoContent();
-            }))
-            .RequireAuthorization(policy => policy.RequireRole(nameof(UserRole.Admin)));
+            }));
 
         // Any active member may see who else has access.
         group.MapGet("", (Guid vaultId, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>

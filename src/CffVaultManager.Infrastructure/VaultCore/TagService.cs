@@ -11,7 +11,7 @@ namespace CffVaultManager.Infrastructure.VaultCore;
 /// <summary>
 /// Tag management scoped to a vault the caller can access (personal or organization). Access and
 /// effective permission are resolved through <see cref="VaultAccessGuard"/>; writes require
-/// <see cref="VaultPermission.ReadWrite"/>. Tag names are kept unique per vault by both a proactive
+/// <see cref="VaultPermissionExtensions.CanWrite"/>. Tag names are kept unique per vault by both a proactive
 /// check and a database unique index (the <see cref="DbUpdateException"/> fallback closes the race).
 /// </summary>
 internal sealed class TagService : ITagService
@@ -23,7 +23,7 @@ internal sealed class TagService : ITagService
     public async Task<TagDto> CreateAsync(Guid vaultId, Guid callerId, CreateTagRequest request, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         if (await _db.Tags.AnyAsync(t => t.VaultId == vaultId && t.Name == request.Name, ct))
         {
@@ -59,7 +59,7 @@ internal sealed class TagService : ITagService
     public async Task<TagDto> RenameAsync(Guid vaultId, Guid tagId, Guid callerId, RenameTagRequest request, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         var tag = await _db.Tags.FirstOrDefaultAsync(t => t.Id == tagId && t.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Tag not found.");
@@ -86,7 +86,7 @@ internal sealed class TagService : ITagService
     public async Task DeleteAsync(Guid vaultId, Guid tagId, Guid callerId, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         var tag = await _db.Tags.FirstOrDefaultAsync(t => t.Id == tagId && t.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Tag not found.");

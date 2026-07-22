@@ -11,7 +11,7 @@ namespace CffVaultManager.Infrastructure.VaultCore;
 /// <summary>
 /// Folder management scoped to a vault the caller can access (personal or organization). Access and
 /// effective permission are resolved through <see cref="VaultAccessGuard"/>; writes require
-/// <see cref="VaultPermission.ReadWrite"/>. Folder names are kept unique per vault by both a
+/// <see cref="VaultPermissionExtensions.CanWrite"/>. Folder names are kept unique per vault by both a
 /// proactive check and a database unique index (the <see cref="DbUpdateException"/> fallback closes
 /// the race).
 /// </summary>
@@ -24,7 +24,7 @@ internal sealed class FolderService : IFolderService
     public async Task<FolderDto> CreateAsync(Guid vaultId, Guid callerId, CreateFolderRequest request, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         if (await _db.Folders.AnyAsync(f => f.VaultId == vaultId && f.Name == request.Name, ct))
         {
@@ -60,7 +60,7 @@ internal sealed class FolderService : IFolderService
     public async Task<FolderDto> RenameAsync(Guid vaultId, Guid folderId, Guid callerId, RenameFolderRequest request, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         var folder = await _db.Folders.FirstOrDefaultAsync(f => f.Id == folderId && f.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Folder not found.");
@@ -87,7 +87,7 @@ internal sealed class FolderService : IFolderService
     public async Task DeleteAsync(Guid vaultId, Guid folderId, Guid callerId, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite) throw new InsufficientVaultPermissionException();
+        if (!permission.CanWrite()) throw new InsufficientVaultPermissionException();
 
         var folder = await _db.Folders.FirstOrDefaultAsync(f => f.Id == folderId && f.VaultId == vaultId, ct)
             ?? throw new KeyNotFoundException("Folder not found.");

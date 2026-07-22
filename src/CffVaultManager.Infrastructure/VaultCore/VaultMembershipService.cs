@@ -12,14 +12,13 @@ namespace CffVaultManager.Infrastructure.VaultCore;
 /// Organization-vault membership management (see docs/features/sharing-access-control.md). Every
 /// wrapped-key value is produced client-side and stored verbatim: this service performs no
 /// cryptography and never sees a private key or an unwrapped DEK. Cross-tenant references are
-/// rejected as "not found" so tenant membership is never leaked. Admin-only operations (invite,
-/// revoke) rely on endpoint-level authorization for the Admin role gate, but that alone is not
-/// sufficient: per docs/multi-tenancy.md and docs/features/roles-permissions.md, "being Admin"
-/// must never be an implicit backdoor into a vault the Admin was never invited to — only someone
-/// who already holds the vault's DEK (i.e. an active ReadWrite member) can produce a valid wrap
-/// for a new member, so <see cref="InviteAsync"/> and <see cref="RevokeAsync"/> additionally
-/// require the caller to be an active <see cref="VaultPermission.ReadWrite"/> member of the target
-/// vault themselves (checked via <see cref="VaultAccessGuard.GetAccessibleVaultAsync"/>).
+/// rejected as "not found" so tenant membership is never leaked. <see cref="InviteAsync"/> and
+/// <see cref="RevokeAsync"/> require the caller to be an active <see cref="VaultPermission.Owner"/>
+/// member of the target vault (checked via <see cref="VaultAccessGuard.GetAccessibleVaultAsync"/>) —
+/// authority over a vault's membership is entirely vault-scoped, decoupled from the caller's
+/// tenant-wide role: a tenant Admin with only <see cref="VaultPermission.ReadWrite"/> on this vault
+/// cannot invite/revoke, and a non-Admin who is this vault's Owner can. This mirrors the same
+/// Owner-only discipline already used for per-item sharing (<c>ItemMembershipService</c>).
 /// </summary>
 internal sealed class VaultMembershipService : IVaultMembershipService
 {
@@ -70,7 +69,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
             throw new KeyNotFoundException("Vault not found.");
         }
 
-        if (permission != VaultPermission.ReadWrite)
+        if (permission != VaultPermission.Owner)
         {
             throw new InsufficientVaultPermissionException();
         }
@@ -113,7 +112,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
             throw new KeyNotFoundException("Vault not found.");
         }
 
-        if (permission != VaultPermission.ReadWrite)
+        if (permission != VaultPermission.Owner)
         {
             throw new InsufficientVaultPermissionException();
         }
@@ -177,7 +176,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
 
     public async Task<IReadOnlyList<VaultMembershipDto>> ListMembersAsync(Guid vaultId, Guid callerId, Guid callerTenantId, CancellationToken ct = default)
     {
-        // Any active member (Read or ReadWrite) may see who else has access; access is verified first.
+        // Any active member (Read, ReadWrite, or Owner) may see who else has access; access is verified first.
         await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
 
         // Ordered client-side after materializing: EF Core's SQLite provider (used in tests)

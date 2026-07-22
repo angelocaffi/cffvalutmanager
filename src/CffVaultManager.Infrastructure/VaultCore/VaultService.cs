@@ -44,14 +44,15 @@ internal sealed class VaultService : IVaultService
         var vault = new Vault(Guid.NewGuid(), callerTenantId, request.Name, isOrganizationVault: true, ownerUserId: null);
         _db.Vaults.Add(vault);
 
-        // The creator is not a special case: they get a membership row wrapped to their own public
-        // key exactly like any invitee (see docs/features/sharing-access-control.md).
+        // The creator gets a membership row wrapped to their own public key exactly like any
+        // invitee (see docs/features/sharing-access-control.md), but as Owner rather than plain
+        // ReadWrite — otherwise nobody could ever invite a second member to a brand-new vault.
         var membership = new VaultMembership(
             Guid.NewGuid(),
             callerTenantId,
             vault.Id,
             callerId,
-            VaultPermission.ReadWrite,
+            VaultPermission.Owner,
             request.WrappedVaultDek,
             request.EphemeralPublicKey,
             invitedByUserId: callerId);

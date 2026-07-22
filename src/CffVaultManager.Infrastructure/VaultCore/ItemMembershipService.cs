@@ -25,7 +25,7 @@ internal sealed class ItemMembershipService : IItemMembershipService
         ArgumentNullException.ThrowIfNull(request);
 
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite)
+        if (!permission.CanWrite())
         {
             throw new InsufficientVaultPermissionException();
         }

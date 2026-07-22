@@ -103,7 +103,7 @@ Accesso di un utente a un vault di organizzazione (mai a un vault personale, che
 | TenantId | FK a Tenant (denormalizzato) |
 | VaultId | FK a Vault — deve avere `IsOrganizationVault = true` |
 | UserId | FK a User — deve appartenere allo stesso Tenant del Vault |
-| Permission | enum: `Read`, `ReadWrite` |
+| Permission | enum: `Read`, `ReadWrite`, `Owner` (`Owner` implica tutte le capacità di `ReadWrite` più l'autorità di invitare/revocare membri — vedi [features/sharing-access-control.md](features/sharing-access-control.md)) |
 | WrappedVaultDek | **[cifrato]** — DEK del vault cifrata per questo membro (AES-256-GCM con chiave derivata via ECDH+HKDF dalla sua chiave pubblica) |
 | EphemeralPublicKey | chiave pubblica X25519 effimera del mittente usata per questo specifico wrapping — non riutilizzata tra membership |
 | InvitedByUserId | FK a User — chi ha eseguito l'invito |

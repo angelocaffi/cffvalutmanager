@@ -129,8 +129,11 @@ public sealed class VaultMembershipEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task POST_membership_invite_as_operator_returns_403()
+    public async Task POST_membership_invite_as_a_non_member_returns_404()
     {
+        // Invite/revoke no longer gate on the tenant Admin role at the endpoint level — the
+        // operator here was never invited to the vault at all, so VaultAccessGuard reports it as
+        // "not found" before any permission is even checked.
         string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
         var operatorAuthHash = RandomBytes(32);
         Guid operatorId = await RegisterOperatorAsync(adminToken, "operator@acme.test", operatorAuthHash);
@@ -138,7 +141,24 @@ public sealed class VaultMembershipEndpointsTests : IAsyncLifetime
         Guid vaultId = await CreateOrgVaultAsync(adminToken, "Team");
 
         var response = await InviteAsync(operatorToken, vaultId, operatorId, "Read");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_membership_invite_by_an_Operator_who_is_vault_Owner_returns_201()
+    {
+        // The point of decoupling membership authority from the tenant role: an Operator (not a
+        // tenant Admin) invited as this vault's Owner can invite a third member end-to-end.
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        var operatorAuthHash = RandomBytes(32);
+        Guid operatorId = await RegisterOperatorAsync(adminToken, "operator@acme.test", operatorAuthHash);
+        string operatorToken = await LoginAsync("operator@acme.test", operatorAuthHash);
+        Guid strangerId = await RegisterOperatorAsync(adminToken, "stranger@acme.test", RandomBytes(32));
+        Guid vaultId = await CreateOrgVaultAsync(adminToken, "Team");
+        Assert.Equal(HttpStatusCode.Created, (await InviteAsync(adminToken, vaultId, operatorId, "Owner")).StatusCode);
+
+        var response = await InviteAsync(operatorToken, vaultId, strangerId, "Read");
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
     [Fact]
@@ -220,8 +240,10 @@ public sealed class VaultMembershipEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task POST_revoke_as_operator_returns_403()
+    public async Task POST_revoke_by_a_non_owner_member_returns_403()
     {
+        // The operator is a genuine member here (Read), so VaultAccessGuard resolves access fine;
+        // the 403 now comes from the service-level Owner check, not a tenant role gate.
         string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
         var operatorAuthHash = RandomBytes(32);
         Guid operatorId = await RegisterOperatorAsync(adminToken, "operator@acme.test", operatorAuthHash);

@@ -24,7 +24,7 @@ internal sealed class ExternalShareLinkService : IExternalShareLinkService
         ArgumentNullException.ThrowIfNull(request);
 
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite)
+        if (!permission.CanWrite())
         {
             throw new InsufficientVaultPermissionException();
         }
@@ -85,7 +85,7 @@ internal sealed class ExternalShareLinkService : IExternalShareLinkService
     public async Task RevokeAsync(Guid vaultId, Guid itemId, Guid linkId, Guid callerId, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
-        if (permission != VaultPermission.ReadWrite)
+        if (!permission.CanWrite())
         {
             throw new InsufficientVaultPermissionException();
         }

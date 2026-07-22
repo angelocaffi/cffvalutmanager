@@ -55,7 +55,7 @@ public sealed class VaultMembershipTests : IDisposable
     // ---- CreateOrganizationVaultAsync -------------------------------------------------------
 
     [Fact]
-    public async Task CreateOrganizationVaultAsync_creates_org_vault_and_readwrite_membership_for_creator()
+    public async Task CreateOrganizationVaultAsync_creates_org_vault_and_owner_membership_for_creator()
     {
         var (tenantId, adminId, _) = await ProvisionAsync();
 
@@ -80,7 +80,7 @@ public sealed class VaultMembershipTests : IDisposable
 
         var membership = await verify.VaultMemberships.IgnoreQueryFilters()
             .SingleAsync(m => m.VaultId == created.Id && m.UserId == adminId);
-        Assert.Equal(VaultPermission.ReadWrite, membership.Permission);
+        Assert.Equal(VaultPermission.Owner, membership.Permission);
         Assert.Null(membership.RevokedAt);
         Assert.Equal(wrapped, membership.WrappedVaultDek);
         Assert.Equal(ephemeral, membership.EphemeralPublicKey);
@@ -277,6 +277,42 @@ public sealed class VaultMembershipTests : IDisposable
         await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
             new VaultMembershipService(ctx).InviteAsync(orgVault, readerId, tenantId,
                 new CreateMembershipRequest(strangerId, VaultPermission.Read, WrappedDek(), EphemeralKey())));
+    }
+
+    [Fact]
+    public async Task InviteAsync_by_a_ReadWrite_member_who_is_not_Owner_throws_InsufficientVaultPermissionException()
+    {
+        // Behavior change: a plain ReadWrite member used to be able to invite (gated by tenant
+        // Admin role at the endpoint); now only the vault's own Owner can, regardless of tenant role.
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var writerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var strangerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        await InviteMemberAsync(orgVault, adminId, tenantId, writerId, VaultPermission.ReadWrite);
+
+        using var ctx = CreateContext(Tenant(tenantId, writerId));
+        await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
+            new VaultMembershipService(ctx).InviteAsync(orgVault, writerId, tenantId,
+                new CreateMembershipRequest(strangerId, VaultPermission.Read, WrappedDek(), EphemeralKey())));
+    }
+
+    [Fact]
+    public async Task InviteAsync_by_an_Operator_who_is_vault_Owner_succeeds_even_without_tenant_Admin_role()
+    {
+        // The whole point of the Owner role: vault membership authority is decoupled from the
+        // caller's tenant-wide role. An Operator (not a tenant Admin) invited as Owner can manage
+        // this vault's membership just like the Admin creator could.
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var operatorId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var strangerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        await InviteMemberAsync(orgVault, adminId, tenantId, operatorId, VaultPermission.Owner);
+
+        using var ctx = CreateContext(Tenant(tenantId, operatorId));
+        var dto = await new VaultMembershipService(ctx).InviteAsync(orgVault, operatorId, tenantId,
+            new CreateMembershipRequest(strangerId, VaultPermission.Read, WrappedDek(), EphemeralKey()));
+
+        Assert.Equal(strangerId, dto.UserId);
     }
 
     // ---- GetPublicKeyAsync ------------------------------------------------------------------
@@ -528,7 +564,7 @@ public sealed class VaultMembershipTests : IDisposable
         using (var ctx = CreateContext(Tenant(tenantId, adminId)))
         {
             var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(ctx, orgVault, adminId, default);
-            Assert.Equal(VaultPermission.ReadWrite, permission);
+            Assert.Equal(VaultPermission.Owner, permission);
         }
 
         using (var ctx = CreateContext(Tenant(tenantId, op2)))
@@ -536,6 +572,22 @@ public sealed class VaultMembershipTests : IDisposable
             var (_, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(ctx, orgVault, op2, default);
             Assert.Equal(VaultPermission.ReadWrite, permission);
         }
+    }
+
+    [Fact]
+    public async Task RevokeAsync_by_a_ReadWrite_member_who_is_not_Owner_throws_InsufficientVaultPermissionException()
+    {
+        // Same behavior change as invite: a plain ReadWrite member can no longer revoke, even
+        // though the old model allowed any ReadWrite member (gated by tenant Admin role) to do so.
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var (orgVault, op1, op2) = await ThreeMemberVaultAsync(tenantId, adminId);
+
+        var request = new RevokeMembershipRequest(op2, Array.Empty<ReencryptedItem>(),
+            new[] { new NewMembership(adminId, WrappedDek(), EphemeralKey()) });
+
+        using var ctx = CreateContext(Tenant(tenantId, op1));
+        await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
+            new VaultMembershipService(ctx).RevokeAsync(orgVault, op1, tenantId, request));
     }
 
     [Fact]
@@ -730,6 +782,25 @@ public sealed class VaultMembershipTests : IDisposable
         using var ctx = CreateContext(Tenant(tenantId, strangerId));
         await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             new VaultMembershipService(ctx).ListMembersAsync(orgVault, strangerId, tenantId));
+    }
+
+    // ---- VaultPermissionExtensions.CanWrite() covers Owner too -------------------------------
+
+    [Fact]
+    public async Task VaultItemService_CreateAsync_by_an_Owner_member_succeeds()
+    {
+        // The write gate on VaultItemService/FolderService/TagService switched from
+        // "permission != ReadWrite" to "!permission.CanWrite()" to accommodate the new Owner
+        // value — this proves an Owner member (not just ReadWrite) can still write.
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var operatorId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        await InviteMemberAsync(orgVault, adminId, tenantId, operatorId, VaultPermission.Owner);
+
+        var itemId = await CreateItemAsync(orgVault, operatorId);
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.True(await verify.VaultItems.IgnoreQueryFilters().AnyAsync(i => i.Id == itemId && i.VaultId == orgVault));
     }
 
     // ---- Personal-vault behavior is unchanged (via GetAccessibleVaultAsync) -----------------
