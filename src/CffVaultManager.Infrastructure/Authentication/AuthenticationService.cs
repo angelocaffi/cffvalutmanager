@@ -35,6 +35,7 @@ internal sealed class AuthenticationService : IAuthenticationService
     private readonly ISecretProtector _secretProtector;
     private readonly IEmailOtpMfaService _emailOtpMfa;
     private readonly IWebAuthnService _webAuthn;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
     // A syntactically valid but never-matching stored hash, used so an unknown-email login pays
     // the same Argon2id cost as a wrong-password attempt against a real account — otherwise
@@ -64,7 +65,8 @@ internal sealed class AuthenticationService : IAuthenticationService
         ITotpService totp,
         ISecretProtector secretProtector,
         IEmailOtpMfaService emailOtpMfa,
-        IWebAuthnService webAuthn)
+        IWebAuthnService webAuthn,
+        ISecurityNotificationService? securityNotifications = null)
     {
         _db = db;
         _authHashHasher = authHashHasher;
@@ -74,6 +76,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         _secretProtector = secretProtector;
         _emailOtpMfa = emailOtpMfa;
         _webAuthn = webAuthn;
+        _securityNotifications = securityNotifications;
         _dummyStoredHash = GetOrCreateDummyStoredHash(authHashHasher);
     }
 
@@ -348,6 +351,13 @@ internal sealed class AuthenticationService : IAuthenticationService
         if (await IsTenantSuspendedAsync(user.TenantId, ct))
         {
             return LoginResult.Failure("Tenant is suspended.");
+        }
+
+        // Before this login's own audit entry is written below, so "any prior LoginSuccess from
+        // this IP" correctly excludes the attempt currently in progress.
+        if (_securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyLoginIfNewIpAsync(user.Id, ip, userAgent, ct);
         }
 
         string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime);

@@ -1437,6 +1437,129 @@ public sealed class AuthenticationTests : IDisposable
             .AnyAsync(a => a.UserId == operatorId && a.Action == AuditAction.EmailOtpRequested));
     }
 
+    // ---- Security notifications (docs/features/notifications.md) ----------------------------
+
+    [Fact]
+    public async Task Login_from_a_never_before_seen_ip_sends_a_security_notification_email()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+
+        await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
+
+        Assert.Equal(1, sender.SendCount);
+        Assert.Equal("admin@x.com", sender.LastToEmail);
+        Assert.Contains("9.9.9.9", sender.LastBody);
+    }
+
+    [Fact]
+    public async Task Login_again_from_the_same_ip_does_not_send_a_second_notification()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+
+        await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
+        await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
+
+        Assert.Equal(1, sender.SendCount);
+    }
+
+    [Fact]
+    public async Task Login_from_a_second_new_ip_sends_another_notification()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+
+        await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
+        await auth.LoginAsync("admin@x.com", authHash, "8.8.8.8", "agent");
+
+        Assert.Equal(2, sender.SendCount);
+        Assert.Contains("8.8.8.8", sender.LastBody);
+    }
+
+    [Fact]
+    public async Task ChangeMasterPassword_sends_a_security_notification_email()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new ChangeMasterPasswordService(
+            ctx, _authHashHasher, new RefreshTokenService(ctx), new SecurityNotificationService(ctx, sender));
+
+        bool changed = await service.ChangeMasterPasswordAsync(adminId, new ChangeMasterPasswordRequest(
+            CurrentAuthHash: authHash,
+            NewAuthHash: RandomAuthHash(),
+            NewEncryptedDek: Dek,
+            NewMasterPasswordSalt: Salt,
+            NewKdfMemoryKb: 65536,
+            NewKdfIterations: 3,
+            NewKdfVersion: 1));
+
+        Assert.True(changed);
+        Assert.Equal(1, sender.SendCount);
+        Assert.Equal("admin@x.com", sender.LastToEmail);
+    }
+
+    [Fact]
+    public async Task Disabling_email_otp_mfa_sends_a_security_notification_email()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+
+        var sender = new FakeEmailSender();
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new EmailOtpMfaService(ctx, new FakeEmailSender(), new SecurityNotificationService(ctx, sender));
+
+        await service.DisableAsync(adminId);
+
+        Assert.Equal(1, sender.SendCount);
+        Assert.Contains("Email OTP", sender.LastBody);
+    }
+
+    [Fact]
+    public async Task Removing_a_webauthn_credential_sends_a_security_notification_email_naming_it()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        var authenticator = new FakeWebAuthnAuthenticator();
+        Guid credentialId;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new WebAuthnService(ctx, _fido2);
+            string optionsJson = await service.BeginRegistrationAsync(adminId);
+            var options = CredentialCreateOptions.FromJson(optionsJson);
+            string attestationResponse = authenticator.CreateAttestationResponseJson(options, WebAuthnTestConfig.Origin);
+            credentialId = await service.CompleteRegistrationAsync(adminId, attestationResponse, "Yubikey da ufficio");
+        }
+
+        var sender = new FakeEmailSender();
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new WebAuthnService(ctx, _fido2, new SecurityNotificationService(ctx, sender));
+            await service.RemoveCredentialAsync(adminId, credentialId);
+        }
+
+        Assert.Equal(1, sender.SendCount);
+        Assert.Contains("Yubikey da ufficio", sender.LastBody);
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private CffVaultManagerDbContext CreateContext(ITenantContext tenantContext)
@@ -1453,6 +1576,10 @@ public sealed class AuthenticationTests : IDisposable
     private AuthenticationService CreateAuthService(CffVaultManagerDbContext ctx, IEmailSender emailSender) =>
         new(ctx, _authHashHasher, _jwt, new RefreshTokenService(ctx), _totp, _secretProtector,
             new EmailOtpMfaService(ctx, emailSender), new WebAuthnService(ctx, _fido2));
+
+    private AuthenticationService CreateAuthService(CffVaultManagerDbContext ctx, ISecurityNotificationService securityNotifications) =>
+        new(ctx, _authHashHasher, _jwt, new RefreshTokenService(ctx), _totp, _secretProtector,
+            new EmailOtpMfaService(ctx, new FakeEmailSender()), new WebAuthnService(ctx, _fido2), securityNotifications);
 
     private async Task<(Guid TenantId, Guid AdminId)> ProvisionAsync(byte[] authHash)
     {
@@ -1560,11 +1687,13 @@ public sealed class AuthenticationTests : IDisposable
     {
         public string? LastToEmail;
         public string? LastBody;
+        public int SendCount;
 
         public Task SendAsync(string toEmail, string subject, string body, CancellationToken ct = default)
         {
             LastToEmail = toEmail;
             LastBody = body;
+            SendCount++;
             return Task.CompletedTask;
         }
     }

@@ -23,11 +23,13 @@ internal sealed class WebAuthnService : IWebAuthnService
 
     private readonly CffVaultManagerDbContext _db;
     private readonly IFido2 _fido2;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
-    public WebAuthnService(CffVaultManagerDbContext db, IFido2 fido2)
+    public WebAuthnService(CffVaultManagerDbContext db, IFido2 fido2, ISecurityNotificationService? securityNotifications = null)
     {
         _db = db;
         _fido2 = fido2;
+        _securityNotifications = securityNotifications;
     }
 
     public async Task<string> BeginRegistrationAsync(Guid userId, CancellationToken ct = default)
@@ -157,6 +159,12 @@ internal sealed class WebAuthnService : IWebAuthnService
         }
 
         await _db.SaveChangesAsync(ct);
+
+        if (user is not null && _securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyMfaFactorDisabledAsync(
+                userId, credential.Nickname is null ? "una passkey" : $"la passkey \"{credential.Nickname}\"", ct);
+        }
     }
 
     public async Task<string?> BeginAssertionAsync(Guid userId, CancellationToken ct = default)

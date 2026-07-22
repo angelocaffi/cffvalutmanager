@@ -21,11 +21,13 @@ internal sealed class EmailOtpMfaService : IEmailOtpMfaService
 
     private readonly CffVaultManagerDbContext _db;
     private readonly IEmailSender _emailSender;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
-    public EmailOtpMfaService(CffVaultManagerDbContext db, IEmailSender emailSender)
+    public EmailOtpMfaService(CffVaultManagerDbContext db, IEmailSender emailSender, ISecurityNotificationService? securityNotifications = null)
     {
         _db = db;
         _emailSender = emailSender;
+        _securityNotifications = securityNotifications;
     }
 
     public async Task EnableAsync(Guid userId, CancellationToken ct = default)
@@ -53,6 +55,11 @@ internal sealed class EmailOtpMfaService : IEmailOtpMfaService
         user.MfaEmailOtpEnabled = false;
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.MfaEmailOtpDisabled));
         await _db.SaveChangesAsync(ct);
+
+        if (_securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyMfaFactorDisabledAsync(user.Id, "Email OTP", ct);
+        }
     }
 
     public async Task SendChallengeCodeAsync(Guid userId, string? ip, string? userAgent, CancellationToken ct = default)

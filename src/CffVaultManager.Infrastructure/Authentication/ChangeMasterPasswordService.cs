@@ -18,12 +18,18 @@ internal sealed class ChangeMasterPasswordService : IChangeMasterPasswordService
     private readonly CffVaultManagerDbContext _db;
     private readonly IAuthHashHasher _authHashHasher;
     private readonly IRefreshTokenService _refreshTokens;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
-    public ChangeMasterPasswordService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher, IRefreshTokenService refreshTokens)
+    public ChangeMasterPasswordService(
+        CffVaultManagerDbContext db,
+        IAuthHashHasher authHashHasher,
+        IRefreshTokenService refreshTokens,
+        ISecurityNotificationService? securityNotifications = null)
     {
         _db = db;
         _authHashHasher = authHashHasher;
         _refreshTokens = refreshTokens;
+        _securityNotifications = securityNotifications;
     }
 
     public async Task<bool> ChangeMasterPasswordAsync(Guid userId, ChangeMasterPasswordRequest request, CancellationToken ct = default)
@@ -65,6 +71,11 @@ internal sealed class ChangeMasterPasswordService : IChangeMasterPasswordService
         // without the new master password anyway, so leaving them active buys nothing and a stale
         // stolen refresh token is exactly the scenario a password change is meant to shut out.
         await _refreshTokens.RevokeAllSessionsAsync(user.Id, user.TenantId, ct);
+
+        if (_securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyMasterPasswordChangedAsync(user.Id, ct);
+        }
 
         return true;
     }
