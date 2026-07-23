@@ -4,5 +4,7 @@
 
 @code {
     protected override void OnInitialized() =>
-        Navigation.NavigateTo(Session.IsUnlocked ? "/vault" : "/login");
+        Navigation.NavigateTo(Session.IsUnlocked
+            ? (Session.Role == "SuperAdmin" ? "/admin/tenants" : "/vault")
+            : "/login");
 }

@@ -440,7 +440,14 @@
         var (userId, tenantId, role) = JwtParser.ParseAccessToken(result.AccessToken!);
         Session.Establish(result.AccessToken!, result.RefreshToken!, dek, _email, userId, tenantId, role);
 
-        Navigation.NavigateTo(string.IsNullOrEmpty(_returnUrl) ? "/vault" : _returnUrl);
+        if (!string.IsNullOrEmpty(_returnUrl))
+        {
+            Navigation.NavigateTo(_returnUrl);
+        }
+        else
+        {
+            Navigation.NavigateTo(role == "SuperAdmin" ? "/admin/tenants" : "/vault");
+        }
     }
 
     public void Dispose()
