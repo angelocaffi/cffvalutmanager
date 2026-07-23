@@ -1,0 +1,46 @@
+@implements IDisposable
+@inject ThemeJsInterop ThemeJs
+@inject NavigationManager Navigation
+
+<button type="button" class="theme-toggle btn btn-outline-light btn-sm" @onclick="ToggleAsync"
+        title="@(_isDark ? "Passa al tema chiaro" : "Passa al tema scuro")"
+        aria-label="@(_isDark ? "Passa al tema chiaro" : "Passa al tema scuro")">
+    @if (_isDark)
+    {
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.25" />
+            <path stroke-linecap="round" d="M12 2.75v2M12 19.25v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2.75 12h2M19.25 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg>
+    }
+    else
+    {
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.5A8.25 8.25 0 0 1 9.5 3.75a8.25 8.25 0 1 0 10.75 10.75Z" />
+        </svg>
+    }
+</button>
+
+@code {
+    private bool _isDark;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        _isDark = await ThemeJs.GetCurrentThemeAsync() == "dark";
+    }
+
+    // See wwwroot/js/theme.js's reapplyStoredTheme comment: Blazor Web App's enhanced navigation
+    // strips the client-applied data-bs-theme attribute on every internal navigation (most
+    // noticeably an [Authorize] redirect to /login), so it has to be reasserted here every time —
+    // not just once at startup.
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        await ThemeJs.ReapplyStoredThemeAsync();
+
+    private async Task ToggleAsync()
+    {
+        _isDark = !_isDark;
+        await ThemeJs.SetThemeAsync(_isDark ? "dark" : "light");
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

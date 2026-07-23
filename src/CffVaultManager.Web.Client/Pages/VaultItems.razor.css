@@ -47,9 +47,13 @@
     background-color: rgba(var(--brand-navy-rgb), 0.06);
 }
 
+[data-bs-theme="dark"] .vault-sidebar-link:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
 .vault-sidebar-link.active {
     background-color: var(--bs-primary-bg-subtle);
-    color: var(--brand-navy);
+    color: var(--brand-navy-contrast);
     font-weight: 600;
 }
 
@@ -87,7 +91,7 @@
     width: 100%;
     text-align: left;
     border: 1px solid transparent;
-    background: #fff;
+    background: var(--brand-surface);
     border-radius: var(--bs-border-radius);
     padding: 0.55rem 0.75rem;
     transition: background-color 0.1s ease-in-out, border-color 0.1s ease-in-out;
@@ -95,6 +99,10 @@
 
 .vault-row:hover {
     background-color: rgba(var(--brand-navy-rgb), 0.04);
+}
+
+[data-bs-theme="dark"] .vault-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .vault-row.active {
@@ -138,12 +146,17 @@
     flex: 1 1 auto;
     min-width: 0;
     flex-direction: column;
-    background: #fff;
+    background: var(--brand-surface);
     border: 1px solid rgba(var(--brand-navy-rgb), 0.08);
     border-radius: var(--bs-border-radius-lg);
     box-shadow: 0 0.125rem 0.5rem rgba(var(--brand-navy-rgb), 0.06);
     padding: 1.25rem;
     min-height: 24rem;
+}
+
+[data-bs-theme="dark"] .vault-detail-pane {
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.4);
 }
 
 @media (max-width: 991.98px) {

@@ -16,7 +16,7 @@
 
 <PageTitle>@(_isNew ? "Nuova voce" : "Modifica voce")</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="h3 mb-0">@(_isNew ? "Nuova voce" : "Modifica voce")</h1>
     <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Annulla</a>
 </div>
@@ -100,7 +100,7 @@ else
                         <ul class="list-group mb-3">
                             @foreach (var m in _members)
                             {
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
                                     <span class="small font-monospace">@m.UserId @(m.UserId == _ownerId ? "(tu)" : "")</span>
                                     <span class="d-flex align-items-center gap-2">
                                         <span class="badge bg-secondary">@PermissionLabel(m.Permission)</span>

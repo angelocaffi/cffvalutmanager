@@ -1,25 +1,42 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject SessionState Session
 @inject NavigationManager Navigation
+@inject NavbarJsInterop NavbarJs
 
-<nav class="navbar navbar-expand navbar-dark app-navbar sticky-top">
+<nav class="navbar navbar-expand-lg navbar-dark app-navbar sticky-top">
     <div class="container-fluid">
         <a class="navbar-brand d-flex align-items-center gap-2" href="/">
             <img src="/CffVaultmanager.svg" alt="CffVaultManager" class="app-logo" />
             <span>CffVaultManager</span>
         </a>
 
+        <div class="d-flex align-items-center gap-2 order-lg-2">
+            <ThemeToggle />
+            @if (Session.IsUnlocked)
+            {
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#appNavbarCollapse"
+                        aria-controls="appNavbarCollapse" aria-expanded="false" aria-label="Attiva/disattiva navigazione">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+            }
+        </div>
+
         @if (Session.IsUnlocked)
         {
-            <div class="d-flex align-items-center gap-3">
-                <NavLink class="nav-link text-white-50" href="/vault" Match="NavLinkMatch.Prefix">Vault</NavLink>
-                <NavLink class="nav-link text-white-50" href="/shared-with-me" Match="NavLinkMatch.Prefix">Condivisi con me</NavLink>
-                <NavLink class="nav-link text-white-50" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink>
-                <NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink>
-                <NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink>
-                <span class="text-white-50 small d-none d-sm-inline">@Session.Email</span>
-                <NotificationBell />
-                <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
+            <div class="collapse navbar-collapse order-lg-1" id="appNavbarCollapse">
+                <ul class="navbar-nav me-lg-auto mt-3 mt-lg-0 gap-lg-1">
+                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/vault" Match="NavLinkMatch.Prefix">Vault</NavLink></li>
+                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/shared-with-me" Match="NavLinkMatch.Prefix">Condivisi con me</NavLink></li>
+                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink></li>
+                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink></li>
+                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink></li>
+                </ul>
+                <div class="d-flex align-items-center gap-3 mt-3 mt-lg-0">
+                    <span class="text-white-50 small">@Session.Email</span>
+                    <NotificationBell />
+                    <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
+                </div>
             </div>
         }
     </div>
@@ -36,9 +53,18 @@
 </div>
 
 @code {
+    protected override void OnInitialized() => Navigation.LocationChanged += OnLocationChanged;
+
+    // Bootstrap's collapse has no notion of Blazor's client-side routing, so it never closes on
+    // its own when a NavLink is tapped — see wwwroot/js/navbar.js.
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        await NavbarJs.CollapseAsync("appNavbarCollapse");
+
     private void Lock()
     {
         Session.Clear();
         Navigation.NavigateTo("/login");
     }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
 }

@@ -11,6 +11,7 @@
 
 .notification-dropdown {
     width: 22rem;
+    max-width: calc(100vw - 2rem);
     max-height: 24rem;
     overflow-y: auto;
 }

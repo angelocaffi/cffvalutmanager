@@ -6,6 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <ResourcePreloader />
+    @* Applied synchronously, before any stylesheet paints, so there is no flash of the wrong
+       theme: reads the persisted choice (Web.Client/wwwroot/js/theme.js writes it) or, absent
+       one, the OS/browser preference. Duplicated (not imported from theme.js) on purpose — an ES
+       module import is async and would reintroduce the flash it exists to avoid. *@
+    <script>
+        (function () {
+            var stored = localStorage.getItem("cffvaultmanager-theme");
+            var theme = stored === "light" || stored === "dark"
+                ? stored
+                : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+            document.documentElement.setAttribute("data-bs-theme", theme);
+        })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="@Assets["CffVaultmanager.svg"]" />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />

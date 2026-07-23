@@ -19,6 +19,13 @@
     --brand-cyan-rgb: 0, 217, 236;
     --brand-ink: #12202b;
     --brand-bg: #f4f7f8;
+    --brand-surface: #ffffff;
+
+    /* Same value as --brand-navy/--brand-teal in light mode — these only diverge in dark mode,
+       where the raw brand hues are too dark to use as *text*/link color on a dark background (see
+       the dark block below). Kept as separate variables so callers don't need a per-theme branch. */
+    --brand-navy-contrast: var(--brand-navy);
+    --brand-teal-contrast: var(--brand-teal);
 
     --bs-font-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 
@@ -54,12 +61,85 @@
     --bs-border-radius-lg: 0.75rem;
 }
 
+/*
+ * Dark theme — the same brand hues (navy shield, teal, cyan keyhole) applied to a dark canvas
+ * instead of a re-hued palette, so the logo and the reserved "unlock" cyan accent stay recognizable
+ * in both modes. Only the tokens the light block above actually redefines need a dark counterpart
+ * here: every other Bootstrap variable (--bs-secondary-color, --bs-border-color, --bs-tertiary-bg,
+ * form validation colors, etc.) already ships its own [data-bs-theme=dark] value in
+ * bootstrap.min.css and needs no help. Declared after the `:root, [data-bs-theme="light"]` block on
+ * purpose: `:root` always matches (it's what makes that block double as a no-JS/no-attribute
+ * fallback), so on equal selector specificity the block that comes *later* in the file wins the
+ * cascade on `<html data-bs-theme="dark">` — this one, not `:root` silently winning again.
+ */
+[data-bs-theme="dark"] {
+    --brand-bg: #0b141c;
+    --brand-ink: #e7eef3;
+    --brand-surface: #131f29;
+
+    /* Lighter siblings of --brand-navy/--brand-teal, used only where those are too dark to read
+       as text/links on this background — the navbar, .btn-info and .btn-primary keep the literal
+       brand-navy/brand-teal/brand-cyan values in both themes, since those are always painted as a
+       filled background (white text on top), not floated on the page background directly. */
+    --brand-navy-contrast: #7fb3e6;
+    --brand-teal-contrast: #4fc7dd;
+
+    --bs-body-bg: var(--brand-bg);
+    --bs-body-color: var(--brand-ink);
+
+    --bs-primary-bg-subtle: #112a3e;
+    --bs-primary-border-subtle: #1d4567;
+    --bs-primary-text-emphasis: var(--brand-navy-contrast);
+
+    --bs-secondary-bg-subtle: #0e2a30;
+    --bs-secondary-border-subtle: #1c4951;
+    --bs-secondary-text-emphasis: var(--brand-teal-contrast);
+
+    --bs-info-text-emphasis: #83f1fa;
+    --bs-info-bg-subtle: #062f35;
+    --bs-info-border-subtle: #0a454d;
+
+    --bs-link-color: var(--brand-teal-contrast);
+    --bs-link-color-rgb: 79, 199, 221;
+    --bs-link-hover-color: var(--brand-navy-contrast);
+    --bs-link-hover-color-rgb: 127, 179, 230;
+}
+
+/* The watermark's navy/teal tones need a lift to stay visible against a near-black background —
+   at the light theme's 0.05 opacity they'd all but disappear here. */
+[data-bs-theme="dark"] body::before {
+    opacity: 0.09;
+    filter: saturate(1.3) brightness(1.7);
+}
+
 /* .btn-info's default Bootstrap text color is dark-on-cyan already (good contrast); just make
    sure the unlock button reads as the primary action visually (bold weight) without becoming a
    second "primary" color used everywhere. */
 .btn-info {
     font-weight: 600;
     color: var(--brand-ink);
+}
+
+/* .btn-primary and .form-check-input:checked ship with Bootstrap's own blue baked in at
+   Sass-compile time — unlike .bg-primary/.border-primary/etc, they're not wired to the
+   --bs-primary custom property above, so overriding that variable alone silently does nothing for
+   them. Pin them to the brand navy explicitly instead (same navy in both themes: see the dark
+   block's comment above for why). */
+.btn-primary {
+    --bs-btn-color: #fff;
+    --bs-btn-bg: var(--brand-navy);
+    --bs-btn-border-color: var(--brand-navy);
+    --bs-btn-hover-bg: #0c3f65;
+    --bs-btn-hover-border-color: #0c3f65;
+    --bs-btn-active-bg: #0a3454;
+    --bs-btn-active-border-color: #0a3454;
+    --bs-btn-disabled-bg: var(--brand-navy);
+    --bs-btn-disabled-border-color: var(--brand-navy);
+}
+
+.form-check-input:checked {
+    background-color: var(--brand-navy);
+    border-color: var(--brand-navy);
 }
 
 .navbar-brand img {
@@ -160,8 +240,14 @@ main {
 /* ---- Elevation & motion --------------------------------------------------------------------- */
 
 .card {
+    background-color: var(--brand-surface);
     border: 1px solid rgba(var(--brand-navy-rgb), 0.08);
     box-shadow: 0 0.125rem 0.5rem rgba(var(--brand-navy-rgb), 0.06);
+}
+
+[data-bs-theme="dark"] .card {
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.35);
 }
 
 a.list-group-item-action,
@@ -173,6 +259,11 @@ a.list-group-item-action:hover,
 a.card:hover {
     box-shadow: 0 0.5rem 1.25rem -0.25rem rgba(var(--brand-navy-rgb), 0.18);
     transform: translateY(-1px);
+}
+
+[data-bs-theme="dark"] a.list-group-item-action:hover,
+[data-bs-theme="dark"] a.card:hover {
+    box-shadow: 0 0.5rem 1.5rem -0.25rem rgba(0, 0, 0, 0.5);
 }
 
 .btn {
@@ -205,6 +296,10 @@ a.card:hover {
     color: var(--bs-secondary-color);
     border-bottom-width: 1px;
     background-color: rgba(var(--brand-navy-rgb), 0.03);
+}
+
+[data-bs-theme="dark"] .table thead th {
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .table tbody tr {
@@ -276,6 +371,10 @@ a.card:hover {
     box-shadow: 0 1rem 2.5rem -1rem rgba(var(--brand-navy-rgb), 0.28), 0 0.25rem 0.75rem -0.25rem rgba(var(--brand-navy-rgb), 0.12);
 }
 
+[data-bs-theme="dark"] .login-card {
+    box-shadow: 0 1rem 2.5rem -1rem rgba(0, 0, 0, 0.6), 0 0.25rem 0.75rem -0.25rem rgba(0, 0, 0, 0.35);
+}
+
 .login-logo {
     height: 3.5rem;
     width: auto;
@@ -300,10 +399,10 @@ a.card:hover {
 
 .vault-tile-icon-personal {
     background-color: var(--bs-primary-bg-subtle);
-    color: var(--brand-navy);
+    color: var(--brand-navy-contrast);
 }
 
 .vault-tile-icon-org {
     background-color: var(--bs-secondary-bg-subtle);
-    color: var(--brand-teal);
+    color: var(--brand-teal-contrast);
 }

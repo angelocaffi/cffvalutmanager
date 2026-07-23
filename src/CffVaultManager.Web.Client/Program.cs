@@ -52,6 +52,8 @@ builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<FileDownloadJsInterop>();
 builder.Services.AddScoped<UrlFragmentJsInterop>();
+builder.Services.AddScoped<ThemeJsInterop>();
+builder.Services.AddScoped<NavbarJsInterop>();
 builder.Services.AddScoped<TokenRefreshScheduler>();
 builder.Services.AddScoped<KeyPairProvisioningService>();
 

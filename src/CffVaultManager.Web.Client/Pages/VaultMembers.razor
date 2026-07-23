@@ -12,7 +12,7 @@
 
 <PageTitle>Membri del vault</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="h3 mb-0">Membri del vault</h1>
     <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Torna al vault</a>
 </div>
@@ -36,7 +36,7 @@ else
             <ul class="list-group mb-0">
                 @foreach (var member in _members)
                 {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <span class="small font-monospace">@member.UserId @(member.UserId == Session.UserId ? "(tu)" : "")</span>
                         <span class="d-flex align-items-center gap-2">
                             <span class="badge bg-secondary">@PermissionLabel(member.Permission)</span>
