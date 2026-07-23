@@ -213,6 +213,12 @@
             string filename = $"cffvaultmanager-backup-{vaultName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.json";
             await FileDownload.DownloadAsync(filename, json);
         }
+        catch (HttpRequestException)
+        {
+            // Most likely this vault was revoked (or deleted) since the page was last loaded —
+            // e.g. an Owner revoked this member's access to an organization vault in another tab.
+            _errorMessage = "Impossibile accedere a questo vault. Potresti non farne più parte.";
+        }
         finally
         {
             _busy = false;
@@ -278,6 +284,11 @@
         catch (JsonException)
         {
             _errorMessage = "Il file selezionato non è un backup CffVaultManager valido.";
+        }
+        catch (HttpRequestException)
+        {
+            // Most likely this vault was revoked (or deleted) since the page was last loaded.
+            _errorMessage = "Impossibile accedere a questo vault. Potresti non farne più parte.";
         }
         finally
         {
@@ -466,6 +477,11 @@
             _csvDataRows = null;
             _csvVendor = null;
             _csvRows = null;
+        }
+        catch (HttpRequestException)
+        {
+            // Most likely this vault was revoked (or deleted) since the page was last loaded.
+            _errorMessage = "Impossibile accedere a questo vault. Potresti non farne più parte.";
         }
         finally
         {
