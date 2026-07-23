@@ -92,6 +92,21 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Faint brand-mark watermark behind every page — fixed to the viewport (not the document), so it
+   stays put regardless of scroll position or how tall a given page's content is. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("CffVaultmanager.svg");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 34rem;
+    opacity: 0.05;
+    z-index: -1;
+    pointer-events: none;
+}
+
 h1, h2, h3, .h1, .h2, .h3 {
     font-weight: 700;
     letter-spacing: -0.01em;
