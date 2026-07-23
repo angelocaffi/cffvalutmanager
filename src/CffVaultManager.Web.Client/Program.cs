@@ -46,6 +46,8 @@ builder.Services.AddScoped<NotificationApiClient>();
 builder.Services.AddScoped<ShareLinkApiClient>();
 builder.Services.AddScoped<ItemSharingApiClient>();
 builder.Services.AddScoped<ItemKeyResolver>();
+builder.Services.AddScoped<VaultMembershipApiClient>();
+builder.Services.AddScoped<VaultDekResolver>();
 builder.Services.AddScoped<WebAuthnJsInterop>();
 builder.Services.AddScoped<ClipboardJsInterop>();
 builder.Services.AddScoped<FileDownloadJsInterop>();

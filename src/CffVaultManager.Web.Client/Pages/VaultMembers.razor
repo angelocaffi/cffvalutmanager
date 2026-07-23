@@ -1,0 +1,239 @@
+@page "/vault/{VaultId:guid}/members"
+@attribute [Authorize]
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@inject VaultApiClient VaultApi
+@inject VaultMembershipApiClient VaultMembershipApi
+@inject VaultDekResolver VaultDekResolver
+@inject SessionState Session
+@inject IAeadCipherService AeadCipher
+@inject ItemKeyResolver ItemKeyResolver
+
+<PageTitle>Membri del vault</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Membri del vault</h1>
+    <a class="btn btn-outline-secondary" href="@($"/vault/{VaultId}")">Torna al vault</a>
+</div>
+
+@if (_loading)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else if (_access is null || !_access.IsOrganizationVault)
+{
+    <EmptyState Message="Questo vault è personale: non ha membri da gestire." />
+}
+else
+{
+    <div class="card mb-4" style="max-width: 40rem;">
+        <div class="card-body">
+            <h2 class="h5">Membri attuali</h2>
+            <ul class="list-group mb-0">
+                @foreach (var member in _members)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span class="small font-monospace">@member.UserId @(member.UserId == Session.UserId ? "(tu)" : "")</span>
+                        <span class="d-flex align-items-center gap-2">
+                            <span class="badge bg-secondary">@PermissionLabel(member.Permission)</span>
+                            @if (_access.IsOwner && member.UserId != Session.UserId)
+                            {
+                                <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => RevokeAsync(member.UserId)">Revoca</button>
+                            }
+                        </span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    @if (_access.IsOwner)
+    {
+        <div class="card" style="max-width: 40rem;">
+            <div class="card-body">
+                <h2 class="h5">Invita un utente</h2>
+                <form @onsubmit="InviteAsync" @onsubmit:preventDefault="true">
+                    <div class="mb-2">
+                        <label class="form-label">Email destinatario</label>
+                        <input class="form-control" @bind="_inviteEmail" disabled="@_busy" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Permesso</label>
+                        <select class="form-select" style="max-width: 12rem;" @bind="_invitePermission" disabled="@_busy">
+                            <option value="Read">Sola lettura</option>
+                            <option value="ReadWrite">Modifica</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_inviteEmail))">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Invita
+                    </button>
+                </form>
+            </div>
+        </div>
+    }
+
+    @if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger py-2 mt-3" style="max-width: 40rem;" role="alert">@_errorMessage</div>
+    }
+    @if (_successMessage is not null)
+    {
+        <div class="alert alert-success py-2 mt-3" style="max-width: 40rem;" role="alert">@_successMessage</div>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid VaultId { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private VaultAccess? _access;
+    private IReadOnlyList<VaultMembershipResponse> _members = [];
+
+    private string _inviteEmail = string.Empty;
+    private string _invitePermission = "Read";
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+        try
+        {
+            _access = await VaultDekResolver.ResolveAsync(VaultId);
+            if (_access.IsOrganizationVault)
+            {
+                _members = await VaultMembershipApi.ListMembersAsync(VaultId);
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task InviteAsync()
+    {
+        if (_access is null || string.IsNullOrWhiteSpace(_inviteEmail))
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _successMessage = null;
+        _busy = true;
+        try
+        {
+            var target = await VaultMembershipApi.GetPublicKeyByEmailAsync(_inviteEmail.Trim());
+            if (target is null)
+            {
+                _errorMessage = "Utente non trovato o senza una coppia di chiavi generata.";
+                return;
+            }
+
+            var (ephemeralPublicKey, wrappedDek) = ItemKeyResolver.Wrap(target.PublicKey, _access.Dek);
+            var (success, _, error) = await VaultMembershipApi.InviteAsync(VaultId, target.UserId, _invitePermission, wrappedDek, ephemeralPublicKey);
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _members = await VaultMembershipApi.ListMembersAsync(VaultId);
+            _successMessage = "Utente invitato correttamente.";
+            _inviteEmail = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevokeAsync(Guid userId)
+    {
+        if (_access is null)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _successMessage = null;
+        _busy = true;
+        try
+        {
+            var items = await VaultApi.ListItemsAsync(VaultId);
+            byte[] newDek = RandomNumberGenerator.GetBytes(CryptoConstants.KeyLengthBytes);
+
+            var reencryptedItems = new List<ReencryptedItemRequest>();
+            foreach (var item in items)
+            {
+                byte[] payload;
+                if (item.MySharedAccess is not null)
+                {
+                    // Already promoted to its own dedicated per-item key (see
+                    // docs/features/sharing-access-control.md) — unaffected by the vault DEK
+                    // rotation, so its ciphertext is resubmitted unchanged. It still has to appear
+                    // here: the server requires this list to cover exactly the vault's current items.
+                    payload = item.EncryptedPayload;
+                }
+                else
+                {
+                    var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
+                    byte[] plaintext = AeadCipher.Decrypt(blob, _access.Dek);
+                    payload = AeadCipher.Encrypt(plaintext, newDek).ToBytes();
+                }
+
+                reencryptedItems.Add(new ReencryptedItemRequest(item.Id, payload));
+            }
+
+            var remaining = _members.Where(m => m.UserId != userId).ToList();
+            var newMemberships = new List<NewVaultMembershipRequest>();
+            foreach (var member in remaining)
+            {
+                byte[]? publicKey = await VaultMembershipApi.GetPublicKeyByUserIdAsync(member.UserId);
+                if (publicKey is null)
+                {
+                    _errorMessage = "Impossibile recuperare la chiave pubblica di un membro rimanente.";
+                    return;
+                }
+
+                var (ephemeralPublicKey, wrappedDek) = ItemKeyResolver.Wrap(publicKey, newDek);
+                newMemberships.Add(new NewVaultMembershipRequest(member.UserId, wrappedDek, ephemeralPublicKey));
+            }
+
+            var (success, error) = await VaultMembershipApi.RevokeAsync(VaultId, userId, reencryptedItems, newMemberships);
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _access = new VaultAccess(newDek, _access.Permission);
+            VaultDekResolver.SetResolved(VaultId, newDek, _access.Permission);
+            _members = await VaultMembershipApi.ListMembersAsync(VaultId);
+            _successMessage = "Accesso revocato.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string PermissionLabel(string permission) => permission switch
+    {
+        "Read" => "Sola lettura",
+        "ReadWrite" => "Modifica",
+        "Owner" => "Proprietario",
+        _ => permission,
+    };
+}

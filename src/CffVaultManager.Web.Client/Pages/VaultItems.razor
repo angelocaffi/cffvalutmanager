@@ -5,10 +5,10 @@
 @using CffVaultManager.Crypto.Abstractions
 @using CffVaultManager.Web.Client.Models
 @inject VaultApiClient VaultApi
-@inject SessionState Session
 @inject IAeadCipherService AeadCipher
 @inject NavigationManager Navigation
 @inject ItemKeyResolver ItemKeyResolver
+@inject VaultDekResolver VaultDekResolver
 @inject ClipboardJsInterop Clipboard
 
 <PageTitle>Vault</PageTitle>
@@ -76,6 +76,10 @@ else
             </form>
 
             <div class="vault-sidebar-footer">
+                @if (_vaultAccess?.IsOrganizationVault == true)
+                {
+                    <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/members")">Gestisci membri</a>
+                }
                 <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/backup")">Backup</a>
                 <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/trash")">Cestino</a>
             </div>
@@ -284,6 +288,7 @@ else
     public Guid VaultId { get; set; }
 
     private IReadOnlyList<VaultItemResponse>? _items;
+    private VaultAccess? _vaultAccess;
     private readonly Dictionary<Guid, DecryptedSummary> _summaries = new();
     private IReadOnlyList<FolderResponse> _folders = [];
     private string _newFolderName = string.Empty;
@@ -306,10 +311,22 @@ else
     private async Task ReloadAsync()
     {
         _errorMessage = null;
-        _items = await VaultApi.ListItemsAsync(VaultId);
-        _folders = await VaultApi.ListFoldersAsync(VaultId);
+        try
+        {
+            _items = await VaultApi.ListItemsAsync(VaultId);
+            _folders = await VaultApi.ListFoldersAsync(VaultId);
+        }
+        catch (HttpRequestException)
+        {
+            // Most likely this vault was revoked (or deleted) since the page was last loaded —
+            // e.g. an Owner revoked this member's access to an organization vault in another tab.
+            _items = [];
+            _errorMessage = "Impossibile accedere a questo vault. Potresti non farne più parte.";
+            return;
+        }
 
-        byte[] dek = Session.RequireDek();
+        _vaultAccess = await VaultDekResolver.ResolveAsync(VaultId);
+        byte[] dek = _vaultAccess.Dek;
         _summaries.Clear();
         foreach (var item in _items)
         {
@@ -450,7 +467,7 @@ else
     {
         try
         {
-            byte[] dek = Session.RequireDek();
+            byte[] dek = (_vaultAccess ?? await VaultDekResolver.ResolveAsync(VaultId)).Dek;
             byte[] key = item.MySharedAccess is { } access
                 ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
                 : dek;

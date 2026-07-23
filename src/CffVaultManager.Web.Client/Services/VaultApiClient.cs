@@ -25,6 +25,30 @@ public sealed class VaultApiClient
         return [.. (await personal ?? []), .. (await organization ?? [])];
     }
 
+    /// <summary>
+    /// Creates a new organization vault. Tenant-role Admin only (server-enforced). The DEK is
+    /// generated and wrapped for the creator's own public key client-side, exactly like any other
+    /// member's wrap — the server never sees it unwrapped.
+    /// </summary>
+    public async Task<(bool Success, VaultResponse? Vault, string? Error)> CreateOrganizationVaultAsync(
+        string name, byte[] wrappedVaultDek, byte[] ephemeralPublicKey, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/vaults/organization", new
+        {
+            Name = name,
+            WrappedVaultDek = wrappedVaultDek,
+            EphemeralPublicKey = ephemeralPublicKey,
+        }, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+            return (false, null, problem?.Error ?? "Impossibile creare il vault.");
+        }
+
+        return (true, await response.Content.ReadFromJsonAsync<VaultResponse>(JsonOptions, ct), null);
+    }
+
     // ---- Folders ------------------------------------------------------------------------------
 
     public async Task<IReadOnlyList<FolderResponse>> ListFoldersAsync(Guid vaultId, CancellationToken ct = default) =>

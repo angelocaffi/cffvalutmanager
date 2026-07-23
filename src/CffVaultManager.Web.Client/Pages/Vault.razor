@@ -1,10 +1,55 @@
 @page "/vault"
 @attribute [Authorize]
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
 @inject VaultApiClient VaultApi
+@inject SessionState Session
+@inject ItemKeyResolver ItemKeyResolver
+@inject VaultDekResolver VaultDekResolver
+@inject NavigationManager Navigation
 
 <PageTitle>Vault</PageTitle>
 
-<h1 class="h3 mb-4">I tuoi vault</h1>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">I tuoi vault</h1>
+    @if (Session.Role == "Admin" && !_showCreateForm)
+    {
+        <button type="button" class="btn btn-primary" @onclick="() => _showCreateForm = true">Nuova organizzazione</button>
+    }
+</div>
+
+@if (_showCreateForm)
+{
+    <div class="card mb-4" style="max-width: 28rem;">
+        <div class="card-body">
+            <h2 class="h5">Nuovo vault organizzazione</h2>
+            <p class="text-body-secondary small">
+                Un vault condiviso con altri utenti del tenant: ogni membro ottiene una propria copia
+                cifrata della chiave del vault, mai il server.
+            </p>
+            <form @onsubmit="CreateOrganizationVaultAsync" @onsubmit:preventDefault="true">
+                @if (_createError is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@_createError</div>
+                }
+                <div class="mb-3">
+                    <label class="form-label">Nome</label>
+                    <input class="form-control" @bind="_newVaultName" disabled="@_createBusy" />
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@(_createBusy || string.IsNullOrWhiteSpace(_newVaultName))">
+                        @if (_createBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Crea vault
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_createBusy" @onclick="CancelCreate">Annulla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
 
 @if (_vaults is null)
 {
@@ -55,8 +100,51 @@ else
 @code {
     private IReadOnlyList<VaultResponse>? _vaults;
 
+    private bool _showCreateForm;
+    private string _newVaultName = string.Empty;
+    private bool _createBusy;
+    private string? _createError;
+
     protected override async Task OnInitializedAsync()
     {
         _vaults = await VaultApi.ListVaultsAsync();
+    }
+
+    private void CancelCreate()
+    {
+        _showCreateForm = false;
+        _newVaultName = string.Empty;
+        _createError = null;
+    }
+
+    private async Task CreateOrganizationVaultAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newVaultName))
+        {
+            return;
+        }
+
+        _createError = null;
+        _createBusy = true;
+        try
+        {
+            byte[] dek = RandomNumberGenerator.GetBytes(CryptoConstants.KeyLengthBytes);
+            byte[] ownPublicKey = await ItemKeyResolver.GetOwnPublicKeyAsync();
+            var (ephemeralPublicKey, wrappedDek) = ItemKeyResolver.Wrap(ownPublicKey, dek);
+
+            var (success, vault, error) = await VaultApi.CreateOrganizationVaultAsync(_newVaultName.Trim(), wrappedDek, ephemeralPublicKey);
+            if (!success || vault is null)
+            {
+                _createError = error;
+                return;
+            }
+
+            VaultDekResolver.SetResolved(vault.Id, dek, "Owner");
+            Navigation.NavigateTo($"/vault/{vault.Id}");
+        }
+        finally
+        {
+            _createBusy = false;
+        }
     }
 }

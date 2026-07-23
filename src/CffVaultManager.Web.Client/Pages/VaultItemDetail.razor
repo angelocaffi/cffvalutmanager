@@ -8,11 +8,11 @@
 @using CffVaultManager.Web.Client.Models
 @using CffVaultManager.Web.Client.Shared
 @inject VaultApiClient VaultApi
-@inject SessionState Session
 @inject IAeadCipherService AeadCipher
 @inject NavigationManager Navigation
 @inject ItemSharingApiClient ItemSharingApi
 @inject ItemKeyResolver ItemKeyResolver
+@inject VaultDekResolver VaultDekResolver
 
 <PageTitle>@(_isNew ? "Nuova voce" : "Modifica voce")</PageTitle>
 
@@ -240,7 +240,7 @@ else
         {
             byte[] key = item.MySharedAccess is { } access
                 ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
-                : Session.RequireDek();
+                : (await VaultDekResolver.ResolveAsync(VaultId)).Dek;
             var blob = EncryptedBlob.FromBytes(item.EncryptedPayload);
             byte[] plaintext = AeadCipher.Decrypt(blob, key);
 
@@ -288,7 +288,7 @@ else
 
             byte[] key = _mySharedAccess is { } access
                 ? await ItemKeyResolver.UnwrapAsync(access.WrappedItemKey, access.EphemeralPublicKey)
-                : Session.RequireDek();
+                : (await VaultDekResolver.ResolveAsync(VaultId)).Dek;
             byte[] encryptedPayload = AeadCipher.Encrypt(plaintext, key).ToBytes();
 
             if (_isNew)

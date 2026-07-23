@@ -5,9 +5,9 @@
 @using CffVaultManager.Crypto.Abstractions
 @using CffVaultManager.Web.Client.Models
 @inject VaultApiClient VaultApi
-@inject SessionState Session
 @inject IAeadCipherService AeadCipher
 @inject ItemKeyResolver ItemKeyResolver
+@inject VaultDekResolver VaultDekResolver
 
 <PageTitle>Cestino</PageTitle>
 
@@ -71,9 +71,19 @@ else
     private async Task ReloadAsync()
     {
         _errorMessage = null;
-        _items = await VaultApi.ListTrashAsync(VaultId);
+        try
+        {
+            _items = await VaultApi.ListTrashAsync(VaultId);
+        }
+        catch (HttpRequestException)
+        {
+            // Most likely this vault was revoked (or deleted) since the page was last loaded.
+            _items = [];
+            _errorMessage = "Impossibile accedere a questo vault. Potresti non farne più parte.";
+            return;
+        }
 
-        byte[] dek = Session.RequireDek();
+        byte[] dek = (await VaultDekResolver.ResolveAsync(VaultId)).Dek;
         _titles.Clear();
         foreach (var item in _items)
         {

@@ -6,8 +6,8 @@
 @using CffVaultManager.Web.Client.Models
 @inject VaultApiClient VaultApi
 @inject FileDownloadJsInterop FileDownload
-@inject SessionState Session
 @inject IAeadCipherService AeadCipher
+@inject VaultDekResolver VaultDekResolver
 
 <PageTitle>Backup vault</PageTitle>
 
@@ -410,7 +410,7 @@
         _busy = true;
         try
         {
-            byte[] dek = Session.RequireDek();
+            byte[] dek = (await VaultDekResolver.ResolveAsync(VaultId)).Dek;
             var rows = _csvVendor == CsvVendor.Unknown ? BuildManualCsvRows() : _csvRows ?? [];
 
             var folderNames = rows
