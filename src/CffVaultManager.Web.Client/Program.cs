@@ -42,6 +42,7 @@ builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().Cre
 builder.Services.AddScoped<AuthApiClient>();
 builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<AuditApiClient>();
+builder.Services.AddScoped<NotificationApiClient>();
 builder.Services.AddScoped<ShareLinkApiClient>();
 builder.Services.AddScoped<ItemSharingApiClient>();
 builder.Services.AddScoped<ItemKeyResolver>();

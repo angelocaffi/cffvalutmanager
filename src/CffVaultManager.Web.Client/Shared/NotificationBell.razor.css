@@ -1,0 +1,32 @@
+.notification-bell .btn {
+    line-height: 1;
+}
+
+.notification-badge {
+    position: absolute;
+    top: -0.25rem;
+    right: -0.25rem;
+    font-size: 0.65rem;
+}
+
+.notification-dropdown {
+    width: 22rem;
+    max-height: 24rem;
+    overflow-y: auto;
+}
+
+.notification-list li {
+    cursor: pointer;
+}
+
+.notification-list li:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+
+.notification-unread {
+    background-color: var(--bs-primary-bg-subtle);
+}
+
+.notification-timestamp {
+    font-size: 0.75rem;
+}

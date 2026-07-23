@@ -18,6 +18,7 @@
                 <NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink>
                 <NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink>
                 <span class="text-white-50 small d-none d-sm-inline">@Session.Email</span>
+                <NotificationBell />
                 <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
             </div>
         }

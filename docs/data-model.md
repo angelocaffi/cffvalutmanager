@@ -200,12 +200,29 @@ Link di condivisione a scadenza verso una singola voce, per chi non ha un accoun
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
+## Notification **[tenant-scoped]**
+
+Il canale in-app degli alert di sicurezza (vedi [features/notifications.md](features/notifications.md)) — entità dedicata, non un riuso di `AuditLogEntry` (che mescola troppi tipi di evento e non ha stato letto/non letto).
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant |
+| UserId | FK a User — destinatario |
+| Type | enum: `NewLoginFromUnknownIp`, `MasterPasswordChanged`, `MfaFactorDisabled` |
+| Message | breve, mai un secret |
+| CreatedAt | |
+| ReadAt | nullable — impostato da `MarkAsRead()` |
+
+Indice `(TenantId, UserId, ReadAt)` per il conteggio non-letti veloce.
+
 ## Relazioni
 
 ```
 Tenant 1---N User (tranne SuperAdmin, TenantId nullo)
 Tenant 1---N Vault 1---N VaultItem N---1 Folder
 User 1---N AuditLogEntry
+User 1---N Notification
 User 1---N OneTimeCode
 User 1---N WebAuthnCredential
 User 1---N WebAuthnCeremony

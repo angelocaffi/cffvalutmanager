@@ -1,0 +1,104 @@
+@implements IDisposable
+@inject NotificationApiClient NotificationApi
+@inject NavigationManager Navigation
+
+<div class="dropdown notification-bell">
+    <button type="button" class="btn btn-outline-light btn-sm position-relative" data-bs-toggle="dropdown"
+            aria-expanded="false" @onclick="LoadNotificationsAsync">
+        🔔
+        @if (_unreadCount > 0)
+        {
+            <span class="badge rounded-pill bg-danger notification-badge">@(_unreadCount > 99 ? "99+" : _unreadCount)</span>
+        }
+    </button>
+    <div class="dropdown-menu dropdown-menu-end notification-dropdown p-0">
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+            <span class="fw-semibold">Notifiche</span>
+            <button type="button" class="btn btn-link btn-sm p-0" disabled="@(_unreadCount == 0)" @onclick="MarkAllAsReadAsync">
+                Segna tutte come lette
+            </button>
+        </div>
+        @if (_notifications is null)
+        {
+            <div class="p-3 text-body-secondary small">Caricamento…</div>
+        }
+        else if (_notifications.Count == 0)
+        {
+            <div class="p-3 text-body-secondary small">Nessuna notifica.</div>
+        }
+        else
+        {
+            <ul class="list-unstyled m-0 notification-list">
+                @foreach (var n in _notifications)
+                {
+                    <li class="px-3 py-2 border-bottom @(n.ReadAt is null ? "notification-unread" : "")" @onclick="() => MarkAsReadAsync(n)">
+                        <div class="small">@n.Message</div>
+                        <div class="text-body-secondary notification-timestamp">@n.CreatedAt.ToLocalTime().ToString("g")</div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<NotificationResponse>? _notifications;
+    private int _unreadCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        await RefreshUnreadCountAsync();
+    }
+
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        await RefreshUnreadCountAsync();
+        StateHasChanged();
+    }
+
+    private async Task RefreshUnreadCountAsync()
+    {
+        try
+        {
+            _unreadCount = await NotificationApi.GetUnreadCountAsync();
+        }
+        catch (Exception)
+        {
+            // Best-effort poll — a transient failure here must not disrupt navigation.
+        }
+    }
+
+    private async Task LoadNotificationsAsync()
+    {
+        try
+        {
+            _notifications = await NotificationApi.ListAsync();
+        }
+        catch (Exception)
+        {
+            _notifications = [];
+        }
+    }
+
+    private async Task MarkAsReadAsync(NotificationResponse notification)
+    {
+        if (notification.ReadAt is not null)
+        {
+            return;
+        }
+
+        await NotificationApi.MarkAsReadAsync(notification.Id);
+        await LoadNotificationsAsync();
+        await RefreshUnreadCountAsync();
+    }
+
+    private async Task MarkAllAsReadAsync()
+    {
+        await NotificationApi.MarkAllAsReadAsync();
+        await LoadNotificationsAsync();
+        await RefreshUnreadCountAsync();
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

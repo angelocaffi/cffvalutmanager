@@ -52,6 +52,8 @@ public class CffVaultManagerDbContext : DbContext
 
     public DbSet<ItemMembership> ItemMemberships => Set<ItemMembership>();
 
+    public DbSet<Notification> Notifications => Set<Notification>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Configurations whose global query filter reads the current tenant take this
@@ -73,5 +75,6 @@ public class CffVaultManagerDbContext : DbContext
         modelBuilder.ApplyConfiguration(new WebAuthnCeremonyConfiguration());
         modelBuilder.ApplyConfiguration(new ExternalShareLinkConfiguration(this));
         modelBuilder.ApplyConfiguration(new ItemMembershipConfiguration(this));
+        modelBuilder.ApplyConfiguration(new NotificationConfiguration(this));
     }
 }

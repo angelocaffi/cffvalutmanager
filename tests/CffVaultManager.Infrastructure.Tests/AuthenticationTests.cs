@@ -12,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.RegularExpressions;
 
 namespace CffVaultManager.Infrastructure.Tests;
@@ -1447,7 +1448,7 @@ public sealed class AuthenticationTests : IDisposable
 
         var sender = new FakeEmailSender();
         using var ctx = CreateContext(Unresolved());
-        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
 
         await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
 
@@ -1464,7 +1465,7 @@ public sealed class AuthenticationTests : IDisposable
 
         var sender = new FakeEmailSender();
         using var ctx = CreateContext(Unresolved());
-        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
 
         await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
         await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
@@ -1480,7 +1481,7 @@ public sealed class AuthenticationTests : IDisposable
 
         var sender = new FakeEmailSender();
         using var ctx = CreateContext(Unresolved());
-        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender));
+        var auth = CreateAuthService(ctx, new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
 
         await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
         await auth.LoginAsync("admin@x.com", authHash, "8.8.8.8", "agent");
@@ -1498,7 +1499,7 @@ public sealed class AuthenticationTests : IDisposable
         var sender = new FakeEmailSender();
         using var ctx = CreateContext(Tenant(tenantId, adminId));
         var service = new ChangeMasterPasswordService(
-            ctx, _authHashHasher, new RefreshTokenService(ctx), new SecurityNotificationService(ctx, sender));
+            ctx, _authHashHasher, new RefreshTokenService(ctx), new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
 
         bool changed = await service.ChangeMasterPasswordAsync(adminId, new ChangeMasterPasswordRequest(
             CurrentAuthHash: authHash,
@@ -1524,7 +1525,7 @@ public sealed class AuthenticationTests : IDisposable
 
         var sender = new FakeEmailSender();
         using var ctx = CreateContext(Tenant(tenantId, adminId));
-        var service = new EmailOtpMfaService(ctx, new FakeEmailSender(), new SecurityNotificationService(ctx, sender));
+        var service = new EmailOtpMfaService(ctx, new FakeEmailSender(), new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
 
         await service.DisableAsync(adminId);
 
@@ -1552,12 +1553,79 @@ public sealed class AuthenticationTests : IDisposable
         var sender = new FakeEmailSender();
         using (var ctx = CreateContext(Tenant(tenantId, adminId)))
         {
-            var service = new WebAuthnService(ctx, _fido2, new SecurityNotificationService(ctx, sender));
+            var service = new WebAuthnService(ctx, _fido2, new SecurityNotificationService(ctx, sender, new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
             await service.RemoveCredentialAsync(adminId, credentialId);
         }
 
         Assert.Equal(1, sender.SendCount);
         Assert.Contains("Yubikey da ufficio", sender.LastBody);
+    }
+
+    // ---- In-app notifications are created at the same trigger points as the emails above -----
+
+    [Fact]
+    public async Task Login_from_a_never_before_seen_ip_also_creates_an_in_app_notification()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            var auth = CreateAuthService(ctx, new SecurityNotificationService(
+                ctx, new FakeEmailSender(), new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
+            await auth.LoginAsync("admin@x.com", authHash, "9.9.9.9", "agent");
+        }
+
+        using var verify = CreateContext(Tenant(tenantId, adminId));
+        var notifications = await new NotificationService(verify).ListAsync(adminId);
+        Assert.Single(notifications, n => n.Type == NotificationType.NewLoginFromUnknownIp);
+    }
+
+    [Fact]
+    public async Task ChangeMasterPassword_also_creates_an_in_app_notification()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new ChangeMasterPasswordService(
+                ctx, _authHashHasher, new RefreshTokenService(ctx), new SecurityNotificationService(
+                    ctx, new FakeEmailSender(), new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
+
+            await service.ChangeMasterPasswordAsync(adminId, new ChangeMasterPasswordRequest(
+                CurrentAuthHash: authHash,
+                NewAuthHash: RandomAuthHash(),
+                NewEncryptedDek: Dek,
+                NewMasterPasswordSalt: Salt,
+                NewKdfMemoryKb: 65536,
+                NewKdfIterations: 3,
+                NewKdfVersion: 1));
+        }
+
+        using var verify = CreateContext(Tenant(tenantId, adminId));
+        var notifications = await new NotificationService(verify).ListAsync(adminId);
+        Assert.Single(notifications, n => n.Type == NotificationType.MasterPasswordChanged);
+    }
+
+    [Fact]
+    public async Task Disabling_email_otp_mfa_also_creates_an_in_app_notification()
+    {
+        var authHash = RandomAuthHash();
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        await VerifyEmailAsync(adminId);
+        await EnableEmailOtpMfaAsync(tenantId, adminId);
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var service = new EmailOtpMfaService(ctx, new FakeEmailSender(), new SecurityNotificationService(
+                ctx, new FakeEmailSender(), new NotificationService(ctx), NullLogger<SecurityNotificationService>.Instance));
+            await service.DisableAsync(adminId);
+        }
+
+        using var verify = CreateContext(Tenant(tenantId, adminId));
+        var notifications = await new NotificationService(verify).ListAsync(adminId);
+        Assert.Single(notifications, n => n.Type == NotificationType.MfaFactorDisabled);
     }
 
     // ---- Helpers ----------------------------------------------------------------------------

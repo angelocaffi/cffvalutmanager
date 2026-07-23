@@ -2,6 +2,7 @@ using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CffVaultManager.Infrastructure.Authentication;
 
@@ -10,11 +11,19 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
 {
     private readonly CffVaultManagerDbContext _db;
     private readonly IEmailSender _emailSender;
+    private readonly INotificationService _notifications;
+    private readonly ILogger<SecurityNotificationService> _logger;
 
-    public SecurityNotificationService(CffVaultManagerDbContext db, IEmailSender emailSender)
+    public SecurityNotificationService(
+        CffVaultManagerDbContext db,
+        IEmailSender emailSender,
+        INotificationService notifications,
+        ILogger<SecurityNotificationService> logger)
     {
         _db = db;
         _emailSender = emailSender;
+        _notifications = notifications;
+        _logger = logger;
     }
 
     public async Task NotifyLoginIfNewIpAsync(Guid userId, string? ip, string? userAgent, CancellationToken ct = default)
@@ -43,7 +52,7 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             return;
         }
 
-        await _emailSender.SendAsync(
+        await SendEmailAsync(
             user.Email,
             "Nuovo accesso da un indirizzo IP sconosciuto — CffVaultManager",
             $"Abbiamo rilevato un accesso al tuo account da un indirizzo IP mai visto prima.\n\n" +
@@ -51,6 +60,10 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             "Se sei stato tu, non devi fare nulla. Se non riconosci questo accesso, cambia subito " +
             "la tua master password e controlla le sessioni attive.",
             ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.NewLoginFromUnknownIp,
+            $"Nuovo accesso da un indirizzo IP mai visto prima ({ip}).", ct);
     }
 
     public async Task NotifyMasterPasswordChangedAsync(Guid userId, CancellationToken ct = default)
@@ -61,13 +74,17 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             return;
         }
 
-        await _emailSender.SendAsync(
+        await SendEmailAsync(
             user.Email,
             "La tua master password è stata cambiata — CffVaultManager",
             "La master password del tuo account è stata cambiata e tutte le sessioni attive sono " +
             "state disconnesse. Se sei stato tu, non devi fare nulla. Se non riconosci questa " +
             "modifica, contatta subito il tuo amministratore.",
             ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.MasterPasswordChanged,
+            "La tua master password è stata cambiata.", ct);
     }
 
     public async Task NotifyMfaFactorDisabledAsync(Guid userId, string factorDescription, CancellationToken ct = default)
@@ -78,12 +95,51 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             return;
         }
 
-        await _emailSender.SendAsync(
+        await SendEmailAsync(
             user.Email,
             "Un fattore di autenticazione è stato disattivato — CffVaultManager",
             $"Il fattore di autenticazione a due passaggi \"{factorDescription}\" è stato disattivato " +
             "sul tuo account. Se sei stato tu, non devi fare nulla. Se non riconosci questa modifica, " +
             "riattivalo e cambia subito la tua master password.",
             ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.MfaFactorDisabled,
+            $"Il fattore \"{factorDescription}\" è stato disattivato.", ct);
+    }
+
+    // Both channels below are deliberately best-effort: per ISecurityNotificationService, a
+    // delivery failure here must never fail the underlying operation (login, master password
+    // change, MFA disable) that already succeeded before this point.
+
+    private async Task SendEmailAsync(string toEmail, string subject, string body, CancellationToken ct)
+    {
+        try
+        {
+            await _emailSender.SendAsync(toEmail, subject, body, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send a security notification email; the triggering operation already succeeded.");
+        }
+    }
+
+    private async Task CreateInAppNotificationAsync(Guid? tenantId, Guid userId, NotificationType type, string message, CancellationToken ct)
+    {
+        // A SuperAdmin has no TenantId and no tenant-scoped Notification row can be created for
+        // one; in practice none of the three triggers apply to a SuperAdmin account today.
+        if (tenantId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _notifications.CreateAsync(tenantId.Value, userId, type, message, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create an in-app notification; the triggering operation already succeeded.");
+        }
     }
 }
