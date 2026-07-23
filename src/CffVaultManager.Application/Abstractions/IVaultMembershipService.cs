@@ -40,4 +40,11 @@ public interface IVaultMembershipService
 
     /// <summary>Lists the active members of a vault the caller can access.</summary>
     Task<IReadOnlyList<VaultMembershipDto>> ListMembersAsync(Guid vaultId, Guid callerId, Guid callerTenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the caller's own active membership row for an organization vault, including the
+    /// wrapped DEK material needed to unlock it — never another member's. Not found if the vault
+    /// doesn't exist, isn't an organization vault, or the caller has no active membership on it.
+    /// </summary>
+    Task<MyVaultMembershipDto> GetMyMembershipAsync(Guid vaultId, Guid callerId, Guid callerTenantId, CancellationToken ct = default);
 }

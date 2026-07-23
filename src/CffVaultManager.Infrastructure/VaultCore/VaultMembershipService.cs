@@ -40,7 +40,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
             throw new InvalidOperationException("User has not generated a key pair yet.");
         }
 
-        return new PublicKeyDto(target.PublicKey);
+        return new PublicKeyDto(target.PublicKey, target.Id);
     }
 
     public async Task<PublicKeyDto> GetPublicKeyByEmailAsync(string email, Guid callerTenantId, CancellationToken ct = default)
@@ -56,7 +56,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
             throw new InvalidOperationException("User has not generated a key pair yet.");
         }
 
-        return new PublicKeyDto(target.PublicKey);
+        return new PublicKeyDto(target.PublicKey, target.Id);
     }
 
     public async Task<VaultMembershipDto> InviteAsync(Guid vaultId, Guid callerId, Guid callerTenantId, CreateMembershipRequest request, CancellationToken ct = default)
@@ -188,6 +188,15 @@ internal sealed class VaultMembershipService : IVaultMembershipService
             .ToListAsync(ct);
 
         return memberships.OrderBy(m => m.CreatedAt).ToList();
+    }
+
+    public async Task<MyVaultMembershipDto> GetMyMembershipAsync(Guid vaultId, Guid callerId, Guid callerTenantId, CancellationToken ct = default)
+    {
+        var membership = await _db.VaultMemberships.FirstOrDefaultAsync(
+            m => m.VaultId == vaultId && m.UserId == callerId && m.RevokedAt == null, ct)
+            ?? throw new KeyNotFoundException("Vault not found.");
+
+        return new MyVaultMembershipDto(membership.Id, membership.VaultId, membership.Permission, membership.WrappedVaultDek, membership.EphemeralPublicKey, membership.CreatedAt);
     }
 
     private static VaultMembershipDto ToDto(VaultMembership m) =>

@@ -8,6 +8,15 @@ namespace CffVaultManager.Application.Dtos.VaultCore;
 public sealed record VaultMembershipDto(Guid Id, Guid VaultId, Guid UserId, VaultPermission Permission, DateTimeOffset CreatedAt);
 
 /// <summary>
+/// The caller's own membership row on an organization vault, including their wrapped DEK — safe to
+/// return because a caller can only ever request their own row, never another member's (see
+/// <see cref="IVaultMembershipService.GetMyMembershipAsync"/>). The client needs this to unwrap the
+/// vault's DEK when opening it; <see cref="VaultMembershipDto"/> (the general member list, visible
+/// to every active member) deliberately omits key material for that reason.
+/// </summary>
+public sealed record MyVaultMembershipDto(Guid Id, Guid VaultId, VaultPermission Permission, byte[] WrappedVaultDek, byte[] EphemeralPublicKey, DateTimeOffset CreatedAt);
+
+/// <summary>
 /// Invites a user to an organization vault. <see cref="WrappedVaultDek"/> and
 /// <see cref="EphemeralPublicKey"/> are computed client-side (ECIES over X25519) and stored opaquely.
 /// </summary>
@@ -26,5 +35,11 @@ public sealed record NewMembership(Guid UserId, byte[] WrappedVaultDek, byte[] E
 /// </summary>
 public sealed record RevokeMembershipRequest(Guid RevokedUserId, IReadOnlyList<ReencryptedItem> ReencryptedItems, IReadOnlyList<NewMembership> NewMemberships);
 
-/// <summary>A user's long-term X25519 public key, mediated by the server for client-side wrapping.</summary>
-public sealed record PublicKeyDto(byte[] PublicKey);
+/// <summary>
+/// A user's long-term X25519 public key, mediated by the server for client-side wrapping.
+/// <see cref="UserId"/> is included so the by-email lookup can also resolve the id an organization-
+/// vault invite needs (<see cref="CreateMembershipRequest"/> takes a <see cref="Guid"/>, not an
+/// email — unlike per-item sharing, whose server-side email resolution never has to hand the id
+/// back to the client).
+/// </summary>
+public sealed record PublicKeyDto(byte[] PublicKey, Guid UserId);

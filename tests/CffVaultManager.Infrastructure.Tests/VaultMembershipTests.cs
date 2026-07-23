@@ -784,6 +784,70 @@ public sealed class VaultMembershipTests : IDisposable
             new VaultMembershipService(ctx).ListMembersAsync(orgVault, strangerId, tenantId));
     }
 
+    // ---- GetMyMembershipAsync ----------------------------------------------------------------
+
+    [Fact]
+    public async Task GetMyMembershipAsync_returns_the_callers_own_wrapped_dek()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var operatorId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "A");
+        var wrappedDek = WrappedDek();
+        var ephemeralKey = EphemeralKey();
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new VaultMembershipService(ctx).InviteAsync(orgVault, adminId, tenantId,
+                new CreateMembershipRequest(operatorId, VaultPermission.Read, wrappedDek, ephemeralKey));
+        }
+
+        using var ctx2 = CreateContext(Tenant(tenantId, operatorId));
+        var mine = await new VaultMembershipService(ctx2).GetMyMembershipAsync(orgVault, operatorId, tenantId);
+
+        Assert.Equal(orgVault, mine.VaultId);
+        Assert.Equal(VaultPermission.Read, mine.Permission);
+        Assert.Equal(wrappedDek, mine.WrappedVaultDek);
+        Assert.Equal(ephemeralKey, mine.EphemeralPublicKey);
+    }
+
+    [Fact]
+    public async Task GetMyMembershipAsync_never_returns_another_members_row()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var (orgVault, op1, op2) = await ThreeMemberVaultAsync(tenantId, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, op1));
+        var mine = await new VaultMembershipService(ctx).GetMyMembershipAsync(orgVault, op1, tenantId);
+
+        using var ctxOp2 = CreateContext(Tenant(tenantId, op2));
+        var theirs = await new VaultMembershipService(ctxOp2).GetMyMembershipAsync(orgVault, op2, tenantId);
+
+        Assert.NotEqual(mine.Id, theirs.Id);
+        Assert.NotEqual(mine.WrappedVaultDek, theirs.WrappedVaultDek);
+    }
+
+    [Fact]
+    public async Task GetMyMembershipAsync_for_a_non_member_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var strangerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "A");
+
+        using var ctx = CreateContext(Tenant(tenantId, strangerId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultMembershipService(ctx).GetMyMembershipAsync(orgVault, strangerId, tenantId));
+    }
+
+    [Fact]
+    public async Task GetMyMembershipAsync_for_a_personal_vault_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultMembershipService(ctx).GetMyMembershipAsync(personalVaultId, adminId, tenantId));
+    }
+
     // ---- VaultPermissionExtensions.CanWrite() covers Owner too -------------------------------
 
     [Fact]

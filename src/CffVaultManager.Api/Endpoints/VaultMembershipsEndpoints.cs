@@ -85,6 +85,13 @@ internal static class VaultMembershipsEndpoints
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
                 Results.Ok(await service.ListMembersAsync(vaultId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, ct))));
 
+        // The caller's own row, including their wrapped DEK — needed to unlock the vault. Unlike
+        // the list above, this returns key material, so it is scoped to "mine only" rather than
+        // added as a field on every row of ListMembersAsync's response.
+        group.MapGet("/me", (Guid vaultId, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
+            VaultCoreEndpointHelpers.ExecuteAsync(async () =>
+                Results.Ok(await service.GetMyMembershipAsync(vaultId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, ct))));
+
         return app;
     }
 }

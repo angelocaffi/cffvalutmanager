@@ -328,6 +328,56 @@ public sealed class VaultMembershipEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    // ---- Get my membership -------------------------------------------------------------------
+
+    [Fact]
+    public async Task GET_my_membership_returns_the_callers_own_wrapped_dek()
+    {
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        var operatorAuthHash = RandomBytes(32);
+        Guid operatorId = await RegisterOperatorAsync(adminToken, "op@acme.test", operatorAuthHash);
+        Guid vaultId = await CreateOrgVaultAsync(adminToken, "Team");
+        var wrappedDek = RandomBytes(48);
+        var invite = await SendAuthorizedAsync(HttpMethod.Post, $"/api/vaults/{vaultId}/memberships", adminToken, new
+        {
+            UserId = operatorId,
+            Permission = "Read",
+            WrappedVaultDek = wrappedDek,
+            EphemeralPublicKey = RandomBytes(32),
+        });
+        Assert.Equal(HttpStatusCode.Created, invite.StatusCode);
+        string operatorToken = await LoginAsync("op@acme.test", operatorAuthHash);
+
+        var response = await GetAuthorizedAsync($"/api/vaults/{vaultId}/memberships/me", operatorToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Read", body.RootElement.GetProperty("permission").GetString());
+        Assert.Equal(Convert.ToBase64String(wrappedDek), body.RootElement.GetProperty("wrappedVaultDek").GetString());
+    }
+
+    [Fact]
+    public async Task GET_my_membership_for_a_non_member_returns_404()
+    {
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        var strangerAuthHash = RandomBytes(32);
+        await RegisterOperatorAsync(adminToken, "stranger@acme.test", strangerAuthHash);
+        string strangerToken = await LoginAsync("stranger@acme.test", strangerAuthHash);
+        Guid vaultId = await CreateOrgVaultAsync(adminToken, "Team");
+
+        var response = await GetAuthorizedAsync($"/api/vaults/{vaultId}/memberships/me", strangerToken);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GET_my_membership_for_a_personal_vault_returns_404()
+    {
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        Guid ownedVaultId = await GetOwnedVaultIdAsync(adminToken);
+
+        var response = await GetAuthorizedAsync($"/api/vaults/{ownedVaultId}/memberships/me", adminToken);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     // ---- Permission enforcement over HTTP ---------------------------------------------------
 
     [Fact]
