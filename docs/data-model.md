@@ -13,6 +13,45 @@ Entità principali (nomi indicativi, da raffinare in fase di implementazione). T
 | Plan / Limits | piano, limiti utenti/storage (se previsto un modello a pacchetti) |
 | CreatedAt | |
 
+## TenantBillingProfile **[tenant-scoped, 1:1 con Tenant]**
+
+Dati anagrafici/fiscali dell'organizzazione, raccolti in fase di provisioning (vedi [multi-tenancy.md](multi-tenancy.md#provisioning-di-un-nuovo-tenant)) e riutilizzabili in futuro per selezione piano, addebito e generazione fattura, senza richiederli una seconda volta.
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant, univoco (una sola riga per tenant) |
+| LegalName | ragione sociale, o nome e cognome per un privato |
+| IsBusiness | bool — determina quali tra `VatNumber`/`TaxCode` sono obbligatori lato validazione applicativa |
+| VatNumber | Partita IVA, nullable |
+| TaxCode | Codice Fiscale, nullable |
+| AddressLine / City / PostalCode / Province / Country | indirizzo di fatturazione |
+| SdiCode | Codice Destinatario (7 caratteri) per la fatturazione elettronica italiana, nullable |
+| PecAddress | indirizzo PEC, alternativa a `SdiCode` per la fatturazione elettronica, nullable |
+| Phone | opzionale |
+| CreatedAt / UpdatedAt | |
+
+> Nota: nessun campo qui è **[cifrato]** — sono dati anagrafici/fiscali in chiaro, stessa classe di fiducia di `Tenant.Name`/`PlanName`, mai confusi con i secrets del vault. Vedi [security-model.md](security-model.md#dati-di-fatturazione-provisioning-tenant).
+
+## TenantProvisioningRequest **[staging, non tenant-scoped — il Tenant non esiste ancora]**
+
+Richiesta di creazione organizzazione in attesa di verifica email (vedi [multi-tenancy.md](multi-tenancy.md#provisioning-di-un-nuovo-tenant)). Consumata (eliminata) alla conferma riuscita, quando i suoi dati vengono promossi a `Tenant`/`User`/`TenantBillingProfile` reali; altrimenti scade da sola.
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| Email | amministratore proposto |
+| TenantName / TenantSlug | proposti — l'univocità è verificata sia alla richiesta (proattivo) sia alla conferma (chiude la race, stesso pattern di `ProvisionTenantService` oggi) |
+| *(campi anagrafici)* | stessi campi di `TenantBillingProfile` sopra, copiati lì solo alla conferma riuscita |
+| AuthHash / EncryptedDek / MasterPasswordSalt / KdfMemoryKb / KdfIterations / KdfVersion | materiale crypto opaco, identico a quanto oggi viaggia in `ProvisionTenantRequest` — mai decifrato dal server |
+| CodeHash | hash del codice di verifica — stesso schema di `OneTimeCode.CodeHash` |
+| ExpiresAt | finestra più ampia di un OTP normale (es. 24h) |
+| AttemptCount / MaxAttempts | stesso schema anti-bruteforce di `OneTimeCode` |
+| CreatedAt | usato anche per il cooldown di reinvio |
+| IpAddress / UserAgent | metadato contestuale della richiesta |
+
+> Nota: righe scadute e mai confermate vanno ripulite periodicamente (stesso pattern di `AuditLogRetentionHostedService`) — non contengono secrets in chiaro ma non hanno motivo di persistere indefinitamente.
+
 ## User **[tenant-scoped, tranne SuperAdmin]**
 
 | Campo | Note |
@@ -219,6 +258,8 @@ Indice `(TenantId, UserId, ReadAt)` per il conteggio non-letti veloce.
 ## Relazioni
 
 ```
+Tenant 1---1 TenantBillingProfile
+TenantProvisioningRequest (indipendente — nessuna FK, promossa a Tenant/User/TenantBillingProfile alla conferma)
 Tenant 1---N User (tranne SuperAdmin, TenantId nullo)
 Tenant 1---N Vault 1---N VaultItem N---1 Folder
 User 1---N AuditLogEntry

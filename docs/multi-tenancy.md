@@ -57,9 +57,30 @@ Richiesta HTTP → Middleware di autenticazione (valida JWT)
 
 ## Provisioning di un nuovo tenant
 
-1. Un SuperAdmin (o un flusso di self-service signup, se previsto) crea il tenant: nome, slug univoco, piano/limiti.
-2. Viene creato il primo utente Admin del tenant, con onboarding per impostare la propria master password (mai scelta dal SuperAdmin, per non violare zero-knowledge).
-3. Il tenant parte con un vault di organizzazione vuoto (opzionale) e le policy di default (MFA facoltativa, auto-lock 15 min — personalizzabili dall'Admin).
+Il provisioning self-service è **gated da verifica email**, non più un'unica chiamata pubblica che crea subito Tenant+Admin. Motivazione: `POST /api/tenants` pubblico era finora protetto solo dal rate limiting per IP — nessun controllo impediva la creazione massiva incontrollata di organizzazioni ("chiunque si crea la propria organizzazione senza controllo"). Il gate risolve questo e apre contestualmente un punto naturale dove, in futuro, inserire la selezione di un piano a pagamento.
+
+### Flusso in due fasi
+
+1. **Richiesta** — `POST /api/tenants/requests` (pubblico, rate-limitato come oggi `POST /api/tenants`). Il client genera il materiale crittografico esattamente come nel flusso attuale (salt, KEK via Argon2id con i parametri di produzione, DEK generata e wrappata — tutto lato client, il server riceve solo byte opachi) e invia in un'unica sottomissione:
+   - **Dati organizzazione**: nome, slug desiderato.
+   - **Email amministratore** + materiale crypto opaco (`AuthHash`, `EncryptedDek`, `MasterPasswordSalt`, parametri KDF) — stessa forma di `ProvisionTenantRequest` oggi, invariata.
+   - **Dati anagrafici/fatturazione** (in chiaro, mai un secret — vedi [security-model.md](security-model.md#dati-di-fatturazione-provisioning-tenant)): ragione sociale o nome e cognome, tipo soggetto (privato/azienda), indirizzo di fatturazione, Partita IVA e/o Codice Fiscale, Codice Destinatario SDI o PEC (fatturazione elettronica italiana), telefono opzionale.
+
+   Il server esegue lo stesso controllo proattivo di univocità slug/email di oggi, poi persiste una riga **pending** `TenantProvisioningRequest` (vedi [data-model.md](data-model.md#tenantprovisioningrequest-staging-non-tenant-scoped--il-tenant-non-esiste-ancora)) con un codice di verifica — stesso schema anti-bruteforce di `OneTimeCode` (hash HMAC-SHA256 salato, scadenza, tentativi massimi, cooldown di reinvio). **Nessun Tenant/User viene ancora creato.** Il codice è inviato via email (stesso canale di [features/notifications.md](features/notifications.md)).
+
+2. **Conferma** — `POST /api/tenants/requests/confirm` (pubblico, rate-limitato, anti-enumeration: stessa risposta uniforme per email sconosciuta/codice errato/già confermato, sul modello di `IEmailVerificationService.ConfirmAsync`). Solo con un codice valido e non scaduto, il server esegue **atomicamente** ciò che oggi fa `ProvisionTenantService.ProvisionAsync` — crea Tenant, primo utente Admin, vault personale "Personale", audit `TenantProvisioned` — più una nuova riga `TenantBillingProfile` (vedi [data-model.md](data-model.md#tenantbillingprofile-tenant-scoped-11-con-tenant)) popolata con i dati anagrafici raccolti allo step 1. La `TenantProvisioningRequest` viene eliminata alla conferma; se non confermata entro la finestra di validità (es. 24h — più ampia di un normale OTP, l'utente potrebbe controllare la mail più tardi) scade e viene ripulita periodicamente (stesso pattern di `AuditLogRetentionHostedService`).
+
+Un SuperAdmin può ancora creare un tenant direttamente, senza passare dalla richiesta pubblica gated (onboarding assistito/supporto) — riusa internamente lo stesso `IProvisionTenantService` invocato dallo step 2 del flusso pubblico.
+
+### Cosa NON cambia
+
+- L'invariante "ogni `User` non-SuperAdmin appartiene a esattamente un Tenant": nessun utente "orfano" esiste mai a database — la riga `User` nasce solo alla conferma (step 2), già con il proprio `TenantId`. `TenantProvisioningRequest` non è un tenant né uno user, è solo uno stato di richiesta in attesa.
+- Lo zero-knowledge: il materiale crittografico (`AuthHash`/`EncryptedDek`/salt/parametri KDF) resta identico a oggi, solo persistito temporaneamente in una riga pending invece che direttamente su `User` — il server non lo decifra né lo interpreta in nessuno dei due flussi.
+- Il modello di isolamento tenant, i query filter, la risoluzione tenant per richiesta (sezioni sopra).
+
+### Dati di fatturazione — riuso futuro
+
+I dati anagrafici raccolti allo step 1 sono lo scopo esplicito di questo gate oltre alla verifica email: renderli disponibili senza doverli richiedere una seconda volta quando in futuro verrà introdotto un piano a pagamento — selezione piano, addebito e generazione fattura potranno leggere `TenantBillingProfile` senza un nuovo modulo di raccolta dati. **Fuori scope in questa fase**: l'integrazione con un processore di pagamento (da decidere) e la generazione effettiva di ricevute/fatture — qui si formalizzano solo il modello dati e il punto del flusso in cui i dati vengono raccolti.
 
 ## Scalabilità
 

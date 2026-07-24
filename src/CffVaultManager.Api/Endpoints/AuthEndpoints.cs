@@ -16,12 +16,13 @@ internal static class AuthEndpoints
 {
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        // Self-service tenant signup: creates the organization and its first Admin. Public by
-        // design (see docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant) — the caller is not
-        // yet a member of any tenant, so there is nothing to authorize against. Rate-limited and
-        // duplicate-checked like the other public auth endpoints: unrestricted, it would let
-        // anyone mass-create tenants, and a duplicate slug/email would otherwise surface as an
-        // unhandled 500 from the unique-index violation instead of a clean 409.
+        // Direct tenant provisioning: creates the organization and its first Admin in one call, no
+        // email-verification gate. Public by design (see
+        // docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant) — the caller is not yet a member
+        // of any tenant, so there is nothing to authorize against. Kept for direct/assisted
+        // provisioning (e.g. a SuperAdmin onboarding a customer) and as the bootstrap primitive used
+        // throughout the test suite. The public self-service signup flow (Register.razor) no longer
+        // calls this directly — it goes through the gated pair below instead.
         app.MapPost("/api/tenants", async (ProvisionTenantRequest request, IProvisionTenantService service, CancellationToken ct) =>
         {
             try
@@ -33,6 +34,35 @@ internal static class AuthEndpoints
             {
                 return Results.Conflict(new { error = ex.Message });
             }
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
+        // Gated self-service tenant signup (see docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant):
+        // nothing is created here — only a pending TenantProvisioningRequest, with a verification
+        // code emailed to the prospective admin. Prevents anonymous mass-creation of organizations,
+        // and doubles as the point where billing/anagrafica data is collected for future reuse.
+        app.MapPost("/api/tenants/requests", async (
+            RequestTenantProvisioningRequest request, ITenantProvisioningRequestService service, HttpContext http, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.RequestAsync(request, ClientIp(http), UserAgent(http), ct);
+                return Results.Accepted(value: result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        }).RequireRateLimiting(AuthRateLimiting.PolicyName);
+
+        // Confirms the code above: only then is the tenant actually provisioned (via
+        // IProvisionTenantService, same atomic Tenant+Admin+Vault+BillingProfile transaction as
+        // POST /api/tenants). Anti-enumeration: 401 uniformly for an unknown request id, an expired
+        // or already-exhausted one, or a wrong code — the caller can never tell which occurred.
+        app.MapPost("/api/tenants/requests/confirm", async (
+            ConfirmTenantProvisioningRequest request, ITenantProvisioningRequestService service, HttpContext http, CancellationToken ct) =>
+        {
+            var result = await service.ConfirmAsync(request.RequestId, request.Code, ClientIp(http), UserAgent(http), ct);
+            return result is not null ? Results.Created($"/api/admin/tenants/{result.TenantId}", result) : Results.Unauthorized();
         }).RequireRateLimiting(AuthRateLimiting.PolicyName);
 
         // "Prelogin": lets a client that has never cached its own salt/KDF params (a fresh device,
@@ -235,5 +265,7 @@ internal sealed record ConfirmMfaRequest(string Code);
 internal sealed record ResendEmailVerificationRequest(string Email);
 
 internal sealed record ConfirmEmailVerificationRequest(string Email, string Code);
+
+internal sealed record ConfirmTenantProvisioningRequest(Guid RequestId, string Code);
 
 internal sealed record SetKeyPairRequest(byte[] PublicKey, byte[] EncryptedPrivateKey);

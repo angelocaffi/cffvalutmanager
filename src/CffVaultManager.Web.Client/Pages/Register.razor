@@ -18,10 +18,42 @@
                 <h1 class="h4 mb-0 text-primary">Crea la tua organizzazione</h1>
             </div>
 
-            @if (_done)
+            @if (_step == Step.Done)
             {
                 <p class="text-success">Organizzazione creata. Puoi ora accedere con le credenziali appena scelte.</p>
                 <a class="btn btn-info w-100" href="/login">Vai al login</a>
+            }
+            else if (_step == Step.Confirm)
+            {
+                <p class="text-body-secondary small">
+                    Abbiamo inviato un codice di conferma a <strong>@_adminEmail</strong>. Inseriscilo per completare la creazione dell'organizzazione.
+                </p>
+
+                <form @onsubmit="HandleConfirmAsync" @onsubmit:preventDefault="true">
+                    <div class="mb-3">
+                        <label for="reg-code" class="form-label">Codice di conferma</label>
+                        <input id="reg-code" class="form-control" @bind="_code" @bind:event="oninput"
+                               required disabled="@_busy" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                               autocomplete="one-time-code" />
+                    </div>
+
+                    @if (_errorMessage is not null)
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                    }
+
+                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        @(_busy ? "Conferma in corso…" : "Conferma")
+                    </button>
+                </form>
+
+                <p class="text-center small text-body-secondary mt-3 mb-0">
+                    <a href="#" @onclick="BackToForm" @onclick:preventDefault="true">Torna al modulo</a>
+                </p>
             }
             else
             {
@@ -54,6 +86,83 @@
                                required disabled="@_busy" autocomplete="new-password" />
                     </div>
 
+                    <hr class="my-4" />
+                    <h2 class="h6 mb-3">Dati di fatturazione</h2>
+                    <p class="text-body-secondary small">
+                        Usati solo per un futuro piano a pagamento e per l'eventuale fattura — mai per accedere ai tuoi secrets.
+                    </p>
+
+                    <div class="mb-3">
+                        <label for="reg-billing-subject" class="form-label">Tipo soggetto</label>
+                        <select id="reg-billing-subject" class="form-select" @bind="_isBusinessSelection" disabled="@_busy">
+                            <option value="private">Privato</option>
+                            <option value="business">Azienda</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-legal-name" class="form-label">@(_isBusiness ? "Ragione sociale" : "Nome e cognome")</label>
+                        <input id="reg-legal-name" class="form-control" @bind="_legalName" @bind:event="oninput"
+                               required disabled="@_busy" />
+                    </div>
+                    @if (_isBusiness)
+                    {
+                        <div class="mb-3">
+                            <label for="reg-vat" class="form-label">Partita IVA</label>
+                            <input id="reg-vat" class="form-control" @bind="_vatNumber" @bind:event="oninput"
+                                   required disabled="@_busy" />
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label for="reg-tax-code" class="form-label">Codice Fiscale</label>
+                            <input id="reg-tax-code" class="form-control" @bind="_taxCode" @bind:event="oninput"
+                                   required disabled="@_busy" />
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <label for="reg-address" class="form-label">Indirizzo</label>
+                        <input id="reg-address" class="form-control" @bind="_addressLine" @bind:event="oninput"
+                               required disabled="@_busy" />
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label for="reg-city" class="form-label">Città</label>
+                            <input id="reg-city" class="form-control" @bind="_city" @bind:event="oninput"
+                                   required disabled="@_busy" />
+                        </div>
+                        <div class="col-sm-3">
+                            <label for="reg-postal-code" class="form-label">CAP</label>
+                            <input id="reg-postal-code" class="form-control" @bind="_postalCode" @bind:event="oninput"
+                                   required disabled="@_busy" />
+                        </div>
+                        <div class="col-sm-3">
+                            <label for="reg-province" class="form-label">Provincia</label>
+                            <input id="reg-province" class="form-control" @bind="_province" @bind:event="oninput"
+                                   required disabled="@_busy" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reg-country" class="form-label">Paese</label>
+                        <input id="reg-country" class="form-control" @bind="_country" @bind:event="oninput"
+                               required disabled="@_busy" />
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label for="reg-sdi" class="form-label">Codice Destinatario SDI</label>
+                            <input id="reg-sdi" class="form-control" @bind="_sdiCode" @bind:event="oninput" disabled="@_busy" />
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="reg-pec" class="form-label">PEC</label>
+                            <input id="reg-pec" type="email" class="form-control" @bind="_pecAddress" @bind:event="oninput" disabled="@_busy" />
+                        </div>
+                    </div>
+                    <div class="form-text mb-3">Per la fatturazione elettronica in Italia: uno tra Codice Destinatario SDI e PEC, se disponibili.</div>
+                    <div class="mb-3">
+                        <label for="reg-phone" class="form-label">Telefono (opzionale)</label>
+                        <input id="reg-phone" type="tel" class="form-control" @bind="_phone" @bind:event="oninput" disabled="@_busy" />
+                    </div>
+
                     @if (_errorMessage is not null)
                     {
                         <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
@@ -64,7 +173,7 @@
                         {
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                         }
-                        @(_busy ? "Creazione in corso…" : "Crea organizzazione")
+                        @(_busy ? "Invio in corso…" : "Crea organizzazione")
                     </button>
                 </form>
 
@@ -77,15 +186,40 @@
 </div>
 
 @code {
+    private enum Step { Form, Confirm, Done }
+
+    private Step _step = Step.Form;
+
     private string _tenantName = string.Empty;
     private string _tenantSlug = string.Empty;
     private bool _slugManuallyEdited;
     private string _adminEmail = string.Empty;
     private string _masterPassword = string.Empty;
     private string _masterPasswordConfirm = string.Empty;
+
+    private bool _isBusiness;
+    private string _isBusinessSelection
+    {
+        get => _isBusiness ? "business" : "private";
+        set => _isBusiness = value == "business";
+    }
+    private string _legalName = string.Empty;
+    private string _vatNumber = string.Empty;
+    private string _taxCode = string.Empty;
+    private string _addressLine = string.Empty;
+    private string _city = string.Empty;
+    private string _postalCode = string.Empty;
+    private string _province = string.Empty;
+    private string _country = string.Empty;
+    private string _sdiCode = string.Empty;
+    private string _pecAddress = string.Empty;
+    private string _phone = string.Empty;
+
+    private Guid? _requestId;
+    private string _code = string.Empty;
+
     private string? _errorMessage;
     private bool _busy;
-    private bool _done;
 
     private void SyncSlugFromName()
     {
@@ -126,22 +260,63 @@
             byte[] encryptedDek = DekService.EncryptDek(dek, kek.Key).ToBytes();
             CryptographicOperations.ZeroMemory(dek);
 
-            var (success, error) = await AuthApi.ProvisionTenantAsync(
+            var (requestId, error) = await AuthApi.RequestTenantProvisioningAsync(
                 _tenantName, _tenantSlug, _adminEmail, authHash, encryptedDek, salt,
-                kdfParams.MemoryKb, kdfParams.Iterations, kdfParams.Version);
+                kdfParams.MemoryKb, kdfParams.Iterations, kdfParams.Version,
+                _legalName, _isBusiness, _addressLine, _city, _postalCode, _province, _country,
+                vatNumber: _isBusiness ? _vatNumber : null,
+                taxCode: _isBusiness ? null : _taxCode,
+                sdiCode: string.IsNullOrWhiteSpace(_sdiCode) ? null : _sdiCode,
+                pecAddress: string.IsNullOrWhiteSpace(_pecAddress) ? null : _pecAddress,
+                phone: string.IsNullOrWhiteSpace(_phone) ? null : _phone);
 
+            if (requestId is null)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _requestId = requestId;
+            _step = Step.Confirm;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task HandleConfirmAsync()
+    {
+        if (_requestId is null)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var (success, error) = await AuthApi.ConfirmTenantProvisioningAsync(_requestId.Value, _code);
             if (!success)
             {
                 _errorMessage = error;
                 return;
             }
 
-            _done = true;
+            _step = Step.Done;
         }
         finally
         {
             _busy = false;
         }
+    }
+
+    private void BackToForm()
+    {
+        _errorMessage = null;
+        _code = string.Empty;
+        _requestId = null;
+        _step = Step.Form;
     }
 
     private static string Slugify(string name)

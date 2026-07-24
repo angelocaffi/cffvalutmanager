@@ -66,6 +66,13 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
             kdfIterations: request.KdfIterations,
             kdfVersion: request.KdfVersion);
 
+        // Set only when the caller (the gated self-service flow) already proved ownership of
+        // AdminEmail before calling ProvisionAsync — skips the post-hoc email-verification code below.
+        if (request.EmailAlreadyVerified)
+        {
+            admin.EmailVerifiedAt = DateTimeOffset.UtcNow;
+        }
+
         // The audit entry's TenantId is the tenant being created. It is a plain insert, so the
         // tenant query filter (which only rewrites queries, never writes) does not apply.
         var audit = new AuditLogEntry(Guid.NewGuid(), tenantId, adminId, AuditAction.TenantProvisioned);
@@ -75,6 +82,27 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         _db.Users.Add(admin);
         _db.AuditLogEntries.Add(audit);
         _db.Vaults.Add(new Vault(Guid.NewGuid(), tenantId, "Personale", isOrganizationVault: false, ownerUserId: adminId));
+
+        // Optional billing/anagrafica data (see docs/data-model.md#tenantbillingprofile...) —
+        // a TenantBillingProfile is not a provisioning prerequisite, only created when supplied.
+        if (!string.IsNullOrWhiteSpace(request.LegalName))
+        {
+            _db.TenantBillingProfiles.Add(new TenantBillingProfile(
+                Guid.NewGuid(),
+                tenantId,
+                request.LegalName,
+                request.IsBusiness,
+                request.AddressLine ?? string.Empty,
+                request.City ?? string.Empty,
+                request.PostalCode ?? string.Empty,
+                request.Province ?? string.Empty,
+                request.Country ?? string.Empty,
+                request.VatNumber,
+                request.TaxCode,
+                request.SdiCode,
+                request.PecAddress,
+                request.Phone));
+        }
 
         try
         {
@@ -90,8 +118,10 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         await tx.CommitAsync(ct);
 
         // Best-effort, after the tenant/admin are durably committed — see docs/features/
-        // authentication.md "Verifica email in registrazione".
-        if (_emailVerification is not null)
+        // authentication.md "Verifica email in registrazione". Skipped when the caller already
+        // proved ownership of AdminEmail (the gated self-service flow) — admin.EmailVerifiedAt
+        // was already set above.
+        if (!request.EmailAlreadyVerified && _emailVerification is not null)
         {
             await _emailVerification.RequestAsync(adminId, ip: null, userAgent: null, ct);
         }

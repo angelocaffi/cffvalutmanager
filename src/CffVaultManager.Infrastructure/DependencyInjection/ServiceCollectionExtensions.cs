@@ -79,6 +79,8 @@ public static class ServiceCollectionExtensions
         // Services that touch the (scoped) DbContext.
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IProvisionTenantService, ProvisionTenantService>();
+        services.AddScoped<ITenantProvisioningRequestService, TenantProvisioningRequestService>();
+        services.AddHostedService<TenantProvisioningRequestCleanupHostedService>();
         services.AddScoped<IUserRegistrationService, UserRegistrationService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IMfaSetupService, MfaSetupService>();

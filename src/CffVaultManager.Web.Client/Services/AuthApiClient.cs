@@ -62,6 +62,80 @@ public sealed class AuthApiClient
         return (false, problem?.Error ?? "Impossibile creare l'organizzazione.");
     }
 
+    /// <summary>
+    /// Starts the gated self-service signup (see docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant):
+    /// nothing is created yet, only a pending request — a verification code is emailed to
+    /// <paramref name="adminEmail"/>. Same opaque crypto material as <see cref="ProvisionTenantAsync"/>,
+    /// plus billing/anagrafica data collected here for reuse once a paid plan exists.
+    /// </summary>
+    public async Task<(Guid? RequestId, string? Error)> RequestTenantProvisioningAsync(
+        string tenantName,
+        string tenantSlug,
+        string adminEmail,
+        byte[] authHash,
+        byte[] encryptedDek,
+        byte[] masterPasswordSalt,
+        int kdfMemoryKb,
+        int kdfIterations,
+        int kdfVersion,
+        string legalName,
+        bool isBusiness,
+        string addressLine,
+        string city,
+        string postalCode,
+        string province,
+        string country,
+        string? vatNumber = null,
+        string? taxCode = null,
+        string? sdiCode = null,
+        string? pecAddress = null,
+        string? phone = null,
+        CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/tenants/requests", new
+        {
+            TenantName = tenantName,
+            TenantSlug = tenantSlug,
+            AdminEmail = adminEmail,
+            AuthHash = authHash,
+            EncryptedDek = encryptedDek,
+            MasterPasswordSalt = masterPasswordSalt,
+            KdfMemoryKb = kdfMemoryKb,
+            KdfIterations = kdfIterations,
+            KdfVersion = kdfVersion,
+            LegalName = legalName,
+            IsBusiness = isBusiness,
+            AddressLine = addressLine,
+            City = city,
+            PostalCode = postalCode,
+            Province = province,
+            Country = country,
+            VatNumber = vatNumber,
+            TaxCode = taxCode,
+            SdiCode = sdiCode,
+            PecAddress = pecAddress,
+            Phone = phone,
+        }, ct);
+
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<RequestTenantProvisioningResponse>(JsonOptions, ct);
+            return (result?.RequestId, null);
+        }
+
+        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+        return (null, problem?.Error ?? "Impossibile inviare la richiesta di creazione organizzazione.");
+    }
+
+    /// <summary>Confirms the code emailed by <see cref="RequestTenantProvisioningAsync"/>, actually provisioning the tenant.</summary>
+    public async Task<(bool Success, string? Error)> ConfirmTenantProvisioningAsync(Guid requestId, string code, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/tenants/requests/confirm", new { RequestId = requestId, Code = code }, ct);
+        return response.IsSuccessStatusCode
+            ? (true, null)
+            : (false, "Codice non valido o scaduto. Riprova o richiedi un nuovo codice.");
+    }
+
     public async Task<PreloginResponse> PreloginAsync(string email, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/api/auth/prelogin", new { Email = email }, ct);
@@ -231,3 +305,5 @@ public sealed record KeyPairResponse(byte[] PublicKey, byte[] EncryptedPrivateKe
 public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 
 public sealed record ErrorResponse(string? Error);
+
+public sealed record RequestTenantProvisioningResponse(Guid RequestId);

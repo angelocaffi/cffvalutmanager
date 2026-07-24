@@ -29,6 +29,8 @@ Flusso distinto dall'MFA (attiva l'account, non protegge un login già autentica
 - Stesse garanzie di sicurezza dell'Email OTP MFA (codice generato con RNG crittografico, scadenza breve, monouso, hash a riposo, rate limiting).
 - Confermare l'email **non** abilita di per sé l'Email OTP come fattore MFA: sono due configurazioni separate.
 
+> Nota: questo flusso post-hoc (l'account esiste già, poi si verifica) resta invariato per `UserRegistrationService` (utenti aggiunti da un Admin a un tenant esistente). Il **self-service tenant signup** pubblico (`Register.razor`) invece **non** lo usa più: la verifica avviene *prima* che Tenant/Admin esistano, tramite un gate a due fasi dedicato — vedi [../multi-tenancy.md](../multi-tenancy.md#provisioning-di-un-nuovo-tenant).
+
 ### Email OTP come fattore MFA
 
 - L'utente abilita esplicitamente l'Email OTP nelle impostazioni di sicurezza; l'indirizzo usato è quello dell'account.
