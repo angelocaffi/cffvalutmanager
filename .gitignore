@@ -3,8 +3,14 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
-# Claude Code local session/tool state
-.claude/
+# Claude Code local session/tool state — settings.local.json stays local; these two shared
+# project artifacts (frontend-designer subagent + skill) are tracked so they follow the repo.
+.claude/*
+!.claude/agents/
+!.claude/agents/frontend-designer.md
+!.claude/skills/
+!.claude/skills/frontend-designer/
+!.claude/skills/frontend-designer/SKILL.md
 
 # dotenv files
 .env
