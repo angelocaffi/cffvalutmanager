@@ -43,13 +43,12 @@ Design completo (meccanismo, prova di possesso lato server, MFA-gating, invalida
 
 - **Opt-in**, generato dalla pagina `/security` (non in registrazione): l'utente genera una Recovery Key a 256 bit, mostrata **una sola volta**, con un avviso esplicito di salvarla offline (non recuperabile in seguito).
 - Per recuperare l'accesso: email + Recovery Key → se l'utente ha MFA attivo va comunque verificato → l'utente sceglie una nuova master password → tutte le sessioni attive vengono revocate e viene inviata una notifica di sicurezza (email + in-app), stesso comportamento già in vigore per il cambio master password.
-- **Monouso**: un kit si consuma dopo un recupero riuscito. Va rigenerato anche dopo una rotazione DEK (`/api/auth/rotate-dek`), che lo invalida automaticamente — la UI di `/security` deve mostrare chiaramente lo stato (nessun kit / kit attivo dal \[data\] / kit invalidato, rigeneralo).
-- Non implementato ancora: design formalizzato, in attesa di piano di implementazione.
+- **Monouso**: un kit si consuma dopo un recupero riuscito. Va rigenerato anche dopo una rotazione DEK (`/api/auth/rotate-dek`), che lo invalida automaticamente — la UI di `/security` mostra lo stato (nessun kit / kit attivo dal \[data\] / kit invalidato, rigeneralo).
+- **Implementato**: `IAccountRecoveryService`/`AccountRecoveryService`, endpoint `POST /api/auth/recovery/{start,verify,verify-mfa,mfa/email-otp/send,webauthn/begin,webauthn/complete,complete}` + `POST /api/auth/recovery-kit`, pagina `/recovery` e card dedicata in `/security`. 21 nuovi test. Vedi [../roadmap.md](../roadmap.md) per i dettagli e la verifica dal vivo.
 
-### Recovery MFA via email (backlog v2)
+### Recovery MFA via email — scartata definitivamente
 
-- Idea: usare l'Email OTP come **fallback di recovery** quando l'utente perde il device TOTP.
-- **Funzionalità rischiosa e NON prevista in v1** (backlog v2): un canale di recovery via email indebolisce l'intera protezione MFA se abusato — chi controlla la casella email può aggirare il secondo fattore. Se implementata, va accompagnata da controlli aggiuntivi (conferma multi-step, notifiche, finestre temporali, audit rafforzato) e resta comunque subordinata all'inserimento della master password.
+Idea originaria: usare l'Email OTP come fallback quando l'utente perde il device TOTP. **Scartata**, non solo rimandata: un canale di recovery via email indebolisce l'intera protezione MFA se abusato (chi controlla la casella email aggirerebbe il secondo fattore), esattamente il compromesso che questo progetto ha già rifiutato altrove (vedi il fattore Email OTP stesso, trattato come "più debole" e mai sostitutivo). Il TOTP via app (RFC 6238, compatibile Google Authenticator/Authy) resta il fattore MFA standard, già implementato — vedi "Requisiti funzionali" sopra. Chi perde il device TOTP e non ha registrato un fattore alternativo (WebAuthn, Email OTP) recupera l'accesso tramite il [kit di recupero](#recovery-kit) se ne aveva generato uno in anticipo; non è previsto né in programma un meccanismo di reset MFA lato server (nemmeno da parte di un Admin/SuperAdmin, coerente col principio zero-knowledge).
 
 ## Requisiti di sicurezza
 
