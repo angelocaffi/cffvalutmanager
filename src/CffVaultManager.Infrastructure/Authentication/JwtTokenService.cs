@@ -17,6 +17,17 @@ internal sealed class JwtTokenService : IJwtTokenService
 {
     public const string MfaChallengePurpose = "mfa_challenge";
 
+    /// <summary>
+    /// Deliberately distinct from <see cref="MfaChallengePurpose"/>: a token minted by the recovery
+    /// flow must never validate against a login endpoint's expected purpose, or vice versa — see
+    /// docs/security-model.md#recovery-kit. Without this separation, someone who passed the
+    /// Recovery Key possession check could redirect the resulting challenge to a login MFA endpoint
+    /// and get a normal session without the kit being consumed, sessions revoked, or the owner notified.
+    /// </summary>
+    public const string RecoveryMfaChallengePurpose = "recovery_mfa_challenge";
+
+    public const string RecoveryAuthorizedPurpose = "recovery_authorized";
+
     private const string Issuer = "CffVaultManager";
     private const string Audience = "CffVaultManager";
 
@@ -56,13 +67,27 @@ internal sealed class JwtTokenService : IJwtTokenService
         return CreateToken(claims, lifetime);
     }
 
-    public string CreateMfaChallengeToken(Guid userId, TimeSpan lifetime)
+    public string CreateMfaChallengeToken(Guid userId, TimeSpan lifetime, string purpose = MfaChallengePurpose)
     {
         // Deliberately no tenant_id / role: a stolen challenge token must not confer any access.
         var claims = new Dictionary<string, object>
         {
             ["sub"] = userId.ToString(),
-            ["purpose"] = MfaChallengePurpose,
+            ["purpose"] = purpose,
+            ["jti"] = Guid.NewGuid().ToString(),
+        };
+
+        return CreateToken(claims, lifetime);
+    }
+
+    public string CreateRecoveryAuthorizedToken(Guid userId, TimeSpan lifetime)
+    {
+        // Same minimal-claims shape as CreateMfaChallengeToken: only sub+purpose+jti, no
+        // tenant_id/role, so a stolen token confers nothing beyond submitting a new master password.
+        var claims = new Dictionary<string, object>
+        {
+            ["sub"] = userId.ToString(),
+            ["purpose"] = RecoveryAuthorizedPurpose,
             ["jti"] = Guid.NewGuid().ToString(),
         };
 

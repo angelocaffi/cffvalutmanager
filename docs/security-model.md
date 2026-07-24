@@ -46,6 +46,38 @@ Singoli secrets (password, carte, note) — persistiti come ciphertext + nonce +
 - Sessioni con timeout configurabile e "auto-lock" dopo inattività (analogo al lock di un password manager desktop).
 - Token di sessione (JWT) a vita breve + refresh token con rotazione; refresh token revocabile lato server (logout remoto da tutti i dispositivi).
 
+## Recovery kit
+
+Backlog v2 (vedi [features/authentication.md](features/authentication.md#recovery-kit)): meccanismo **opzionale, opt-in** da `/security` (non obbligatorio in registrazione, per non appesantire un flusso già rivisto — vedi [multi-tenancy.md](multi-tenancy.md#provisioning-di-un-nuovo-tenant)) per recuperare l'accesso al vault senza la master password, senza violare lo zero-knowledge.
+
+### Meccanismo
+
+Una **Recovery Key** casuale a 256 bit (`RandomNumberGenerator`, generata lato client) wrappa direttamente la DEK già sbloccata in sessione (AES-256-GCM, stesso formato `EncryptedBlob` di `EncryptedDek`) → `User.RecoveryEncryptedDek`. La Recovery Key è mostrata **una sola volta** nella UI subito dopo la generazione (da salvare offline: stampa, cassaforte, ecc.) e mai più recuperabile — il server non la vede mai né la deriva, esattamente come la master password.
+
+A differenza della master password, la Recovery Key non passa da Argon2id: è già ad alta entropia (256 bit generati da RNG, non scelti/memorizzati da un umano), quindi non serve rallentarne la derivazione — l'hardening Argon2id esiste per contrastare il brute force di segreti a bassa entropia, non ha alcun beneficio qui e aggiungerebbe solo costo.
+
+### Prova di possesso lato server (gap trovato in fase di design)
+
+A differenza del login, il server non ha per costruzione modo di verificare che chi chiama "completa il recupero" possieda davvero la Recovery Key: senza un controllo dedicato, chiunque conoscesse solo l'email di un account potrebbe sovrascrivere `EncryptedDek`/master password (account takeover o DoS permanente). Fix: esattamente come `AuthHash` prova la conoscenza della master password, il client deriva anche un `RecoveryAuthHash` deterministico dalla Recovery Key (hash con dominio separato, niente Argon2id per lo stesso motivo di cui sopra) e il server lo verifica contro un `User.RecoveryKeyHash` salvato (via lo stesso `IAuthHashHasher` già usato per `MasterPasswordHash` — riuso deliberato dell'astrazione esistente piuttosto che una nuova, anche se il costo Argon2id è tecnicamente superfluo su un input già ad alta entropia: operazione rara, il costo aggiuntivo è trascurabile).
+
+### Flusso di recupero (pubblico, rate-limitato e anti-enumeration come il resto della superficie auth)
+
+1. `POST /api/auth/recovery/start` (email) → ritorna `RecoveryEncryptedDek` (reale, o un blob fittizio ma stabile — stesso trucco del salt fittizio di `/api/auth/prelogin` — se l'email non esiste o non ha un kit configurato). Il ciphertext da solo è inerte: restituirlo a chiunque non rivela nulla.
+2. Il client tenta la decifratura locale con la Recovery Key inserita dall'utente. Se fallisce, errore locale, nessun'altra chiamata (nessuna distinzione server-side possibile tra "email sconosciuta" e "chiave sbagliata": la decifratura è interamente client-side).
+3. `POST /api/auth/recovery/verify` (email, `RecoveryAuthHash`) → verifica lato server. Se l'utente ha MFA attivo, il recupero **lo richiede comunque** (bypassare la master password non deve bypassare anche il secondo fattore) — ritorna una sfida riusando lo stesso `IJwtTokenService`/pattern a token JWT di breve durata già usato per `CreateMfaChallengeToken`; altrimenti ritorna direttamente un `RecoveryToken` (nuovo scope JWT dedicato, breve durata, non riutilizzabile come access token, stesso principio di isolamento già documentato per `CreateMfaChallengeToken`).
+4. Se richiesto, `POST /api/auth/recovery/verify-mfa` (ChallengeToken, Code, Factor) → riusa la verifica dei fattori già esistente (TOTP/WebAuthn/Email OTP); a successo ritorna il `RecoveryToken`.
+5. `POST /api/auth/recovery/complete` (RecoveryToken, nuova master password: `NewAuthHash`/`NewEncryptedDek`/`NewMasterPasswordSalt`/nuovi parametri KDF, generati client-side come nel cambio master password) → applica atomicamente i nuovi materiali, **consuma** il kit di recupero (vedi sotto), revoca tutte le sessioni attive (stesso comportamento già esistente per il cambio master password) e genera una notifica di sicurezza (email + in-app, stessi canali di `SecurityNotificationService`). L'utente deve poi rifare login normalmente con la nuova master password — nessun token emesso direttamente da questo endpoint, stessa scelta già fatta per il cambio master password.
+
+### Invalidazione e monouso
+
+- **Monouso**: dopo un recupero riuscito, `RecoveryEncryptedDek`/`RecoveryKeyHash`/`RecoveryKitGeneratedAt` vengono azzerati — l'utente deve generarne uno nuovo se lo desidera. Difesa in profondità: limita il riuso di un segreto fisico/offline dopo che è stato invocato.
+- **Rotazione DEK indipendente** (`DekRotationService`, vedi [encryption-key-management.md](encryption-key-management.md)): genera una DEK nuova, quindi un kit di recupero esistente (che wrappa la DEK vecchia) diventerebbe silenziosamente inutile. Il client non può ri-wrapparlo per il recupero perché la Recovery Key, per design, non è mai persistita né recuperabile lato client dopo la prima visualizzazione — quindi la rotazione **invalida** esplicitamente il kit esistente (stessi tre campi azzerati) e genera una notifica dedicata, per non lasciare l'utente convinto di avere un paracadute che in realtà non funziona più.
+- **Il cambio master password (`ChangeMasterPasswordService`) NON invalida il kit**: a differenza della rotazione DEK, ri-wrappa la stessa DEK sotto una KEK nuova — la DEK sottostante non cambia, quindi `RecoveryEncryptedDek` (che wrappa la DEK direttamente, non tramite la KEK) resta valido. Invariante non ovvio, va preservato in ogni modifica futura a `ChangeMasterPasswordService`.
+
+### Tradeoff esplicito
+
+Chi entra in possesso della Recovery Key **e** conosce l'email dell'account può decifrare l'intero vault bypassando del tutto la master password (mitigato solo dall'MFA, se attivo). Questo è intrinseco a qualunque meccanismo di recovery key (stesso tradeoff di 1Password Secret Key, Bitwarden Emergency Access): la sicurezza si sposta sul fatto che l'utente la conservi offline, fuori dalla superficie di attacco digitale — coerente con la scelta già fatta per l'accesso fisico al client ("fuori scope primario" nel modello di minaccia sopra). Va comunicato chiaramente nella UI al momento della generazione, non solo qui.
+
 ## Logging e osservabilità
 
 - **Divieto assoluto**: loggare password, numeri di carta, CVV, contenuto di secrets o master password, in qualunque forma (anche mascherata parzialmente, salvo ultime 4 cifre carte dove esplicitamente richiesto dalla UX).

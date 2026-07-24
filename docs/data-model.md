@@ -69,6 +69,9 @@ Richiesta di creazione organizzazione in attesa di verifica email (vedi [multi-t
 | LockedUntil | nullable — finché è nel futuro, il login è rifiutato a prescindere dalle credenziali (vedi [features/authentication.md](features/authentication.md) rate limiting) |
 | PublicKey | nullable — chiave pubblica X25519 (32 byte), in chiaro per definizione; usata per condividere DEK di vault di organizzazione (vedi [features/sharing-access-control.md](features/sharing-access-control.md)) |
 | EncryptedPrivateKey | nullable **[cifrato]** — chiave privata X25519 cifrata con la propria DEK (non una KEK separata), come qualunque altro secret dell'utente |
+| RecoveryEncryptedDek | nullable **[cifrato]** — DEK cifrata con la Recovery Key (non con la KEK), null se l'utente non ha generato un kit di recupero. Vedi [security-model.md](security-model.md#recovery-kit) |
+| RecoveryKeyHash | nullable — hash server-side del `RecoveryAuthHash` client-side (stesso ruolo di `MasterPasswordHash` per `AuthHash`), null se nessun kit attivo |
+| RecoveryKitGeneratedAt | nullable — data di generazione dell'ultimo kit attivo, mostrata in `/security`; azzerata insieme agli altri due campi quando il kit viene consumato o invalidato da una rotazione DEK |
 | CreatedAt / LastLoginAt | |
 
 > Nota: `SuperAdmin` non ha `TenantId` perché non appartiene a un'organizzazione — ha comunque una propria master password e una propria DEK per il proprio vault personale (se previsto), ma nessun accesso ai vault dei tenant.
@@ -235,7 +238,7 @@ Link di condivisione a scadenza verso una singola voce, per chi non ha un accoun
 | TenantId | FK a Tenant — nullable per eventi di piattaforma generati da un SuperAdmin |
 | UserId | chi ha eseguito l'azione |
 | VaultItemId | nullable, quale item (solo riferimento, mai contenuto) |
-| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved`, `ExternalShareLinkCreated`, `ExternalShareLinkRevoked`, `ItemMembershipGranted`, `ItemMembershipRevoked`, `DekRotated` |
+| Action | enum: `Created`, `Viewed`, `Updated`, `Deleted`, `Shared`, `Revoked`, `Revealed`, `MfaEnabled`, `LoginSuccess`, `LoginFailed`, `AccountLocked`, `SessionsRevoked`, `MfaChallenge`, `EmailOtpRequested`, `EmailOtpVerified`, `EmailOtpFailed`, `TenantProvisioned`, `TenantSuspended`, `TenantReactivated`, `UserRoleChanged`, `PermanentlyDeleted`, `MasterPasswordChanged`, `MfaEmailOtpEnabled`, `MfaEmailOtpDisabled`, `WebAuthnCredentialRegistered`, `WebAuthnCredentialRemoved`, `ExternalShareLinkCreated`, `ExternalShareLinkRevoked`, `ItemMembershipGranted`, `ItemMembershipRevoked`, `DekRotated`, `RecoveryKitGenerated`, `AccountRecovered` |
 | Timestamp | |
 | IpAddress / UserAgent | metadato contestuale |
 
@@ -248,7 +251,7 @@ Il canale in-app degli alert di sicurezza (vedi [features/notifications.md](feat
 | Id | GUID |
 | TenantId | FK a Tenant |
 | UserId | FK a User — destinatario |
-| Type | enum: `NewLoginFromUnknownIp`, `MasterPasswordChanged`, `MfaFactorDisabled` |
+| Type | enum: `NewLoginFromUnknownIp`, `MasterPasswordChanged`, `MfaFactorDisabled`, `AccountRecovered`, `RecoveryKitInvalidated` |
 | Message | breve, mai un secret |
 | CreatedAt | |
 | ReadAt | nullable — impostato da `MarkAsRead()` |

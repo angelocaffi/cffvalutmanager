@@ -1,4 +1,4 @@
-@page "/login"
+@page "/recovery"
 @using System.Security.Cryptography
 @using CffVaultManager.Crypto
 @using CffVaultManager.Crypto.Abstractions
@@ -7,32 +7,42 @@
 @inject IKeyDerivationService KeyDerivation
 @inject IAuthHashService AuthHashService
 @inject IDekService DekService
-@inject SessionState Session
+@inject IRecoveryKeyService RecoveryKeyService
 @inject NavigationManager Navigation
 @inject WebAuthnJsInterop WebAuthn
 
-<PageTitle>Accedi</PageTitle>
+<PageTitle>Recupera l'accesso</PageTitle>
 
 <div class="login-shell d-flex justify-content-center">
     <div class="card shadow-sm login-card">
         <div class="card-body p-4">
             <div class="text-center mb-4">
                 <img src="/CffVaultmanager-full.svg" alt="CffVaultManager" class="login-logo mb-2" />
-                <h1 class="h4 mb-0 text-primary">Accedi al tuo vault</h1>
+                <h1 class="h4 mb-0 text-primary">Recupera l'accesso</h1>
             </div>
 
-            @if (_stage == Stage.Credentials)
+            @if (_stage == Stage.Done)
             {
-                <form @onsubmit="HandleCredentialsSubmitAsync" @onsubmit:preventDefault="true">
+                <p class="text-success">Master password reimpostata. Effettua di nuovo il login.</p>
+                <a class="btn btn-info w-100" href="/login">Vai al login</a>
+            }
+            else if (_stage == Stage.EmailAndKey)
+            {
+                <p class="text-body-secondary small">
+                    Inserisci l'email del tuo account e la Recovery Key salvata quando hai generato il
+                    kit di recupero dalle impostazioni di sicurezza.
+                </p>
+
+                <form @onsubmit="HandleEmailAndKeySubmitAsync" @onsubmit:preventDefault="true">
                     <div class="mb-3">
-                        <label for="login-email" class="form-label">Email</label>
-                        <input id="login-email" type="email" class="form-control" @bind="_email" @bind:event="oninput"
+                        <label for="recovery-email" class="form-label">Email</label>
+                        <input id="recovery-email" type="email" class="form-control" @bind="_email" @bind:event="oninput"
                                required disabled="@_busy" autocomplete="username" />
                     </div>
                     <div class="mb-3">
-                        <label for="login-password" class="form-label">Master password</label>
-                        <input id="login-password" type="password" class="form-control" @bind="_masterPassword" @bind:event="oninput"
-                               required disabled="@_busy" autocomplete="current-password" />
+                        <label for="recovery-key" class="form-label">Recovery Key</label>
+                        <input id="recovery-key" type="text" class="form-control font-monospace" @bind="_recoveryKeyInput" @bind:event="oninput"
+                               required disabled="@_busy" placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX" />
                     </div>
 
                     @if (_errorMessage is not null)
@@ -45,20 +55,17 @@
                         {
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                         }
-                        @(_busy ? "Accesso in corso…" : "Accedi")
+                        @(_busy ? "Verifica in corso…" : "Continua")
                     </button>
                 </form>
 
                 <p class="text-center small text-body-secondary mt-3 mb-0">
-                    Non hai un'organizzazione? <a href="/register">Creane una</a>
-                </p>
-                <p class="text-center small text-body-secondary mt-2 mb-0">
-                    <a href="/recovery">Hai dimenticato la master password?</a>
+                    <a href="/login">Torna al login</a>
                 </p>
             }
-            else if (_selectedFactor is null)
+            else if (_stage == Stage.Mfa && _selectedFactor is null)
             {
-                <p class="text-body-secondary small">Scegli come completare l'accesso.</p>
+                <p class="text-body-secondary small">Il tuo account ha un secondo fattore attivo: scegli come completare il recupero.</p>
 
                 @if (_errorMessage is not null)
                 {
@@ -86,7 +93,7 @@
                     }
                 </div>
             }
-            else if (_selectedFactor == "WebAuthn")
+            else if (_stage == Stage.Mfa && _selectedFactor == "WebAuthn")
             {
                 <p class="text-body-secondary small">
                     @(_busy
@@ -114,7 +121,7 @@
                     </button>
                 }
             }
-            else
+            else if (_stage == Stage.Mfa)
             {
                 <form @onsubmit="HandleMfaSubmitAsync" @onsubmit:preventDefault="true">
                     @if (_selectedFactor == "EmailOtp")
@@ -140,8 +147,8 @@
                     }
 
                     <div class="mb-3">
-                        <label for="login-mfa-code" class="form-label">Codice</label>
-                        <input id="login-mfa-code" type="text" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                        <label for="recovery-mfa-code" class="form-label">Codice</label>
+                        <input id="recovery-mfa-code" type="text" class="form-control" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                                @bind="_mfaCode" @bind:event="oninput" required disabled="@_busy" />
                     </div>
 
@@ -174,68 +181,113 @@
                     }
                 </form>
             }
+            else if (_stage == Stage.NewPassword)
+            {
+                <p class="text-body-secondary small">Scegli una nuova master password per il tuo account.</p>
+
+                <form @onsubmit="HandleNewPasswordSubmitAsync" @onsubmit:preventDefault="true">
+                    <div class="mb-3">
+                        <label for="recovery-new-password" class="form-label">Nuova master password</label>
+                        <input id="recovery-new-password" type="password" class="form-control" @bind="_newMasterPassword" @bind:event="oninput"
+                               required disabled="@_busy" minlength="12" autocomplete="new-password" />
+                        <div class="form-text">Almeno 12 caratteri. Non lascia mai il browser.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="recovery-new-password-confirm" class="form-label">Conferma nuova master password</label>
+                        <input id="recovery-new-password-confirm" type="password" class="form-control" @bind="_newMasterPasswordConfirm" @bind:event="oninput"
+                               required disabled="@_busy" autocomplete="new-password" />
+                    </div>
+
+                    @if (_errorMessage is not null)
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                    }
+
+                    <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        @(_busy ? "Salvataggio in corso…" : "Imposta nuova master password")
+                    </button>
+                </form>
+            }
         </div>
     </div>
 </div>
 
 @code {
-    private enum Stage { Credentials, Mfa }
+    private enum Stage { EmailAndKey, Mfa, NewPassword, Done }
 
-    private Stage _stage = Stage.Credentials;
+    private Stage _stage = Stage.EmailAndKey;
+
     private string _email = string.Empty;
-    private string _masterPassword = string.Empty;
+    private string _recoveryKeyInput = string.Empty;
+    private string _newMasterPassword = string.Empty;
+    private string _newMasterPasswordConfirm = string.Empty;
     private string _mfaCode = string.Empty;
     private string? _errorMessage;
     private bool _busy;
-    private string? _returnUrl;
 
     private IReadOnlyList<string> _availableFactors = Array.Empty<string>();
     private string? _selectedFactor;
     private int _resendCooldownSeconds;
-
-    // Null until the first send actually completes — distinct from 0 (which means "sent, then
-    // expired"), so the UI can show "sending…" instead of wrongly claiming an expired code that
-    // was never sent in the first place.
     private int? _codeExpirySeconds;
     private Timer? _countdownTimer;
 
     private const int ResendCooldownSeconds = 60;
     private const int CodeExpirySeconds = 600;
 
-    // Kept only for the short window between the two login steps (an MFA challenge); never
-    // persisted anywhere, and zeroed as soon as it's no longer needed.
-    private byte[]? _pendingKek;
+    // Held only for the duration of this flow, never persisted, zeroed on completion/Dispose —
+    // same discipline as Login.razor's _pendingKek.
+    private byte[]? _dek;
     private string? _pendingChallengeToken;
+    private string? _recoveryToken;
 
-    [Parameter]
-    [SupplyParameterFromQuery(Name = "returnUrl")]
-    public string? ReturnUrlQuery { get; set; }
-
-    protected override void OnInitialized() => _returnUrl = ReturnUrlQuery;
-
-    private async Task HandleCredentialsSubmitAsync()
+    private async Task HandleEmailAndKeySubmitAsync()
     {
         _errorMessage = null;
         _busy = true;
         try
         {
-            var prelogin = await AuthApi.PreloginAsync(_email);
-            var kdfParams = new Argon2Parameters(prelogin.KdfMemoryKb, prelogin.KdfIterations, version: prelogin.KdfVersion);
-
-            using var kek = await KeyDerivation.DeriveKekAsync(_masterPassword, prelogin.MasterPasswordSalt, kdfParams);
-            byte[] authHash = AuthHashService.DeriveAuthHash(kek, _masterPassword);
-
-            var result = await AuthApi.LoginAsync(_email, authHash);
-
-            if (result.RequiresMfa)
+            if (!RecoveryKeyFormatter.TryParse(_recoveryKeyInput, out byte[] recoveryKeyBytes))
             {
-                _pendingKek = kek.Key.ToArray();
+                _errorMessage = "Formato della Recovery Key non valido.";
+                return;
+            }
+
+            byte[] blobBytes = await AuthApi.StartRecoveryAsync(_email);
+
+            byte[] dek;
+            byte[] recoveryAuthHash;
+            try
+            {
+                var blob = EncryptedBlob.FromBytes(blobBytes);
+                dek = DekService.DecryptDek(blob, recoveryKeyBytes);
+                recoveryAuthHash = RecoveryKeyService.DeriveRecoveryAuthHash(recoveryKeyBytes);
+            }
+            catch (Exception)
+            {
+                // Never a further server call here: the server itself cannot distinguish "email
+                // sconosciuta" from "chiave sbagliata" (see docs/security-model.md#recovery-kit),
+                // and neither should this error message.
+                _errorMessage = "Email o Recovery Key non validi.";
+                return;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(recoveryKeyBytes);
+            }
+
+            var result = await AuthApi.VerifyRecoveryAsync(_email, recoveryAuthHash);
+
+            if (result.RequiresMfa && result.MfaChallengeToken is not null)
+            {
+                _dek = dek;
                 _pendingChallengeToken = result.MfaChallengeToken;
                 _availableFactors = result.AvailableMfaFactors ?? Array.Empty<string>();
                 _stage = Stage.Mfa;
 
-                // Only one factor registered: skip the chooser and go straight to it (sending the
-                // Email OTP code immediately, since — unlike TOTP — there is nothing to enter yet).
                 if (_availableFactors.Count == 1)
                 {
                     await SelectFactorAsync(_availableFactors[0]);
@@ -244,17 +296,18 @@
                 return;
             }
 
-            if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
+            if (!result.Success || result.RecoveryToken is null)
             {
-                _errorMessage = "Email o master password errati.";
+                _errorMessage = "Email o Recovery Key non validi.";
                 return;
             }
 
-            CompleteLogin(result, kek.Key);
+            _dek = dek;
+            _recoveryToken = result.RecoveryToken;
+            _stage = Stage.NewPassword;
         }
         finally
         {
-            _masterPassword = string.Empty;
             _busy = false;
         }
     }
@@ -286,10 +339,10 @@
         _busy = true;
         try
         {
-            string? optionsJson = await AuthApi.BeginWebAuthnAssertionAsync(_pendingChallengeToken);
+            string? optionsJson = await AuthApi.BeginRecoveryWebAuthnAssertionAsync(_pendingChallengeToken);
             if (optionsJson is null)
             {
-                _errorMessage = "Impossibile avviare la verifica. Riprova ad accedere.";
+                _errorMessage = "Impossibile avviare la verifica. Riprova dall'inizio.";
                 return;
             }
 
@@ -300,16 +353,15 @@
                 return;
             }
 
-            var result = await AuthApi.CompleteWebAuthnAssertionAsync(_pendingChallengeToken, assertionResponseJson);
-            if (!result.Success || result.AccessToken is null || result.RefreshToken is null
-                || result.CryptoMaterials is null || _pendingKek is null)
+            var result = await AuthApi.CompleteRecoveryWebAuthnAssertionAsync(_pendingChallengeToken, assertionResponseJson);
+            if (!result.Success || result.RecoveryToken is null)
             {
                 _errorMessage = "Verifica non riuscita.";
                 return;
             }
 
-            CompleteLogin(result, _pendingKek);
-            ClearPendingKek();
+            _recoveryToken = result.RecoveryToken;
+            _stage = Stage.NewPassword;
         }
         finally
         {
@@ -327,20 +379,6 @@
         _codeExpirySeconds = null;
     }
 
-    // Zeroes and drops the in-memory KEK. Called only once the MFA step is truly done — a
-    // completed login, or the component being torn down (navigating away mid-flow) — never after
-    // a merely wrong code/failed assertion, which must still allow further attempts up to the
-    // server's own lockout (docs/features/authentication.md). The KEK itself doesn't depend on
-    // which second factor completes it, so switching factors via "Usa un altro metodo" keeps it.
-    private void ClearPendingKek()
-    {
-        if (_pendingKek is not null)
-        {
-            CryptographicOperations.ZeroMemory(_pendingKek);
-            _pendingKek = null;
-        }
-    }
-
     private async Task SendEmailOtpAsync()
     {
         if (_pendingChallengeToken is null)
@@ -351,10 +389,10 @@
         _busy = true;
         try
         {
-            bool sent = await AuthApi.SendMfaEmailOtpAsync(_pendingChallengeToken);
+            bool sent = await AuthApi.SendRecoveryMfaEmailOtpAsync(_pendingChallengeToken);
             if (!sent)
             {
-                _errorMessage = "Impossibile inviare il codice. Riprova ad accedere.";
+                _errorMessage = "Impossibile inviare il codice. Riprova dall'inizio.";
                 return;
             }
 
@@ -404,11 +442,9 @@
 
     private async Task HandleMfaSubmitAsync()
     {
-        if (_pendingKek is null || _pendingChallengeToken is null || _selectedFactor is null)
+        if (_pendingChallengeToken is null || _selectedFactor is null)
         {
-            // Lost the in-memory KEK (e.g. the page was reloaded mid-flow) — nothing to unwrap
-            // the DEK with, so start over rather than get stuck on a form that can't succeed.
-            _stage = Stage.Credentials;
+            _stage = Stage.EmailAndKey;
             return;
         }
 
@@ -416,16 +452,16 @@
         _busy = true;
         try
         {
-            var result = await AuthApi.VerifyMfaAsync(_pendingChallengeToken, _mfaCode, _selectedFactor);
+            var result = await AuthApi.VerifyRecoveryMfaAsync(_pendingChallengeToken, _mfaCode, _selectedFactor);
 
-            if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
+            if (!result.Success || result.RecoveryToken is null)
             {
                 _errorMessage = "Codice non valido.";
                 return;
             }
 
-            CompleteLogin(result, _pendingKek);
-            ClearPendingKek();
+            _recoveryToken = result.RecoveryToken;
+            _stage = Stage.NewPassword;
         }
         finally
         {
@@ -434,28 +470,75 @@
         }
     }
 
-    private void CompleteLogin(LoginResponse result, ReadOnlySpan<byte> kek)
+    private async Task HandleNewPasswordSubmitAsync()
     {
-        StopCountdown();
-        var wrappedDek = EncryptedBlob.FromBytes(result.CryptoMaterials!.EncryptedDek);
-        byte[] dek = DekService.DecryptDek(wrappedDek, kek);
+        _errorMessage = null;
 
-        var (userId, tenantId, role) = JwtParser.ParseAccessToken(result.AccessToken!);
-        Session.Establish(result.AccessToken!, result.RefreshToken!, dek, _email, userId, tenantId, role);
-
-        if (!string.IsNullOrEmpty(_returnUrl))
+        if (_newMasterPassword != _newMasterPasswordConfirm)
         {
-            Navigation.NavigateTo(_returnUrl);
+            _errorMessage = "Le due master password non coincidono.";
+            return;
         }
-        else
+
+        if (_newMasterPassword.Length < 12)
         {
-            Navigation.NavigateTo(role == "SuperAdmin" ? "/admin/tenants" : "/vault");
+            _errorMessage = "La master password deve avere almeno 12 caratteri.";
+            return;
+        }
+
+        if (_dek is null || _recoveryToken is null)
+        {
+            // Lost the in-memory DEK/token (e.g. a page reload mid-flow) — nothing to re-wrap with,
+            // start over rather than get stuck on a form that can't succeed.
+            _stage = Stage.EmailAndKey;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            byte[] salt = RandomNumberGenerator.GetBytes(16);
+            var kdfParams = Argon2Parameters.Default;
+
+            using var kek = await KeyDerivation.DeriveKekAsync(_newMasterPassword, salt, kdfParams);
+            byte[] authHash = AuthHashService.DeriveAuthHash(kek, _newMasterPassword);
+
+            // Re-wraps the DEK unwrapped via the Recovery Key back in step 1 — never generates a
+            // new one, so existing vault items stay decryptable unchanged.
+            byte[] newEncryptedDek = DekService.EncryptDek(_dek, kek.Key).ToBytes();
+
+            var (success, error) = await AuthApi.CompleteRecoveryAsync(
+                _recoveryToken, authHash, newEncryptedDek, salt, kdfParams.MemoryKb, kdfParams.Iterations, kdfParams.Version);
+
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            ClearSensitiveState();
+            _stage = Stage.Done;
+        }
+        finally
+        {
+            _newMasterPassword = string.Empty;
+            _newMasterPasswordConfirm = string.Empty;
+            _busy = false;
+        }
+    }
+
+    private void ClearSensitiveState()
+    {
+        if (_dek is not null)
+        {
+            CryptographicOperations.ZeroMemory(_dek);
+            _dek = null;
         }
     }
 
     public void Dispose()
     {
         StopCountdown();
-        ClearPendingKek();
+        ClearSensitiveState();
     }
 }

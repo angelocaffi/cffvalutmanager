@@ -108,6 +108,48 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             $"Il fattore \"{factorDescription}\" è stato disattivato.", ct);
     }
 
+    public async Task NotifyAccountRecoveredAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null)
+        {
+            return;
+        }
+
+        await SendEmailAsync(
+            user.Email,
+            "Il tuo account è stato recuperato — CffVaultManager",
+            "Il tuo account è stato recuperato tramite il kit di recupero: è stata impostata una " +
+            "nuova master password e tutte le sessioni attive sono state disconnesse. Se sei stato " +
+            "tu, non devi fare nulla. Se non riconosci questa operazione, contatta subito il tuo amministratore.",
+            ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.AccountRecovered,
+            "Il tuo account è stato recuperato con il kit di recupero: nuova master password impostata.", ct);
+    }
+
+    public async Task NotifyRecoveryKitInvalidatedAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null)
+        {
+            return;
+        }
+
+        await SendEmailAsync(
+            user.Email,
+            "Il tuo kit di recupero non è più valido — CffVaultManager",
+            "Hai ruotato la chiave di cifratura del tuo vault: il kit di recupero generato in " +
+            "precedenza non è più utilizzabile. Se vuoi ancora poter recuperare l'accesso senza la " +
+            "master password, generane uno nuovo dalle impostazioni di sicurezza.",
+            ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.RecoveryKitInvalidated,
+            "Il tuo kit di recupero non è più valido: generane uno nuovo se lo desideri ancora.", ct);
+    }
+
     // Both channels below are deliberately best-effort: per ISecurityNotificationService, a
     // delivery failure here must never fail the underlying operation (login, master password
     // change, MFA disable) that already succeeded before this point.

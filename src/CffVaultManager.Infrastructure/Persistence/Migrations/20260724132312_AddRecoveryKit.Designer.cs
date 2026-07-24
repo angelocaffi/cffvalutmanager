@@ -4,6 +4,7 @@ using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CffVaultManager.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CffVaultManagerDbContext))]
-    partial class CffVaultManagerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260724132312_AddRecoveryKit")]
+    partial class AddRecoveryKit
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

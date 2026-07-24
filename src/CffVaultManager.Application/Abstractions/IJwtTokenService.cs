@@ -17,9 +17,22 @@ public interface IJwtTokenService
     string CreateAccessToken(Guid userId, Guid? tenantId, UserRole role, TimeSpan lifetime, string? purpose = null);
 
     /// <summary>
-    /// Creates a short-lived MFA-challenge JWT carrying only <c>sub</c> and <c>purpose=mfa_challenge</c>.
+    /// Creates a short-lived challenge JWT carrying only <c>sub</c> and <c>purpose</c> (e.g.
+    /// login's "mfa_challenge" or recovery's own, distinct purpose — see
+    /// <c>JwtTokenService.RecoveryMfaChallengePurpose</c>). <paramref name="purpose"/> is required
+    /// here (not defaulted) because the concrete implementation's own purpose constants are
+    /// <c>internal</c> to Infrastructure and cannot be referenced from this Application-layer
+    /// interface; callers within Infrastructure pass them explicitly.
     /// </summary>
-    string CreateMfaChallengeToken(Guid userId, TimeSpan lifetime);
+    string CreateMfaChallengeToken(Guid userId, TimeSpan lifetime, string purpose);
+
+    /// <summary>
+    /// Creates a short-lived JWT proving the caller completed the recovery-kit flow (Recovery Key
+    /// possession + MFA if enabled) — see docs/security-model.md#recovery-kit. Same minimal-claims
+    /// shape as the MFA-challenge token (only <c>sub</c>+<c>purpose</c>+<c>jti</c>, no tenant/role):
+    /// a stolen token must not confer any access beyond submitting a new master password.
+    /// </summary>
+    string CreateRecoveryAuthorizedToken(Guid userId, TimeSpan lifetime);
 
     /// <summary>
     /// Validates a token's signature and lifetime and, when <paramref name="expectedPurpose"/> is

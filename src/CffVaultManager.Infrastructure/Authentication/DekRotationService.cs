@@ -11,8 +11,16 @@ namespace CffVaultManager.Infrastructure.Authentication;
 internal sealed class DekRotationService : IDekRotationService
 {
     private readonly CffVaultManagerDbContext _db;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
-    public DekRotationService(CffVaultManagerDbContext db) => _db = db;
+    // securityNotifications is optional so DI resolves it to the real service in production; tests
+    // that don't care about it can omit it, same convenience-default pattern as
+    // ChangeMasterPasswordService/ProvisionTenantService's own optional dependencies.
+    public DekRotationService(CffVaultManagerDbContext db, ISecurityNotificationService? securityNotifications = null)
+    {
+        _db = db;
+        _securityNotifications = securityNotifications;
+    }
 
     public async Task RotateDekAsync(Guid userId, RotateDekRequest request, CancellationToken ct = default)
     {
@@ -70,7 +78,26 @@ internal sealed class DekRotationService : IDekRotationService
         user.EncryptedDek = request.NewEncryptedDek;
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.DekRotated));
 
+        // A recovery kit (see docs/security-model.md#recovery-kit) wraps the DEK directly — a new
+        // DEK means the old kit silently stops working. The Recovery Key is never persisted
+        // client-side after first display, so it can't be used to re-wrap here; the kit must be
+        // invalidated instead. RecoveryKitGeneratedAt is deliberately left untouched (not cleared
+        // like RecoveryEncryptedDek/RecoveryKeyHash) so /security can show "invalidated, regenerate"
+        // rather than "never had one" — see User.RecoveryKitGeneratedAt's own doc comment.
+        bool kitExisted = user.RecoveryEncryptedDek is not null;
+        if (kitExisted)
+        {
+            user.RecoveryEncryptedDek = null;
+            user.RecoveryKeyHash = null;
+            _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.RecoveryKitInvalidated));
+        }
+
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+
+        if (kitExisted && _securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyRecoveryKitInvalidatedAsync(user.Id, ct);
+        }
     }
 }

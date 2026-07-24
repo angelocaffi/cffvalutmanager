@@ -5,4 +5,6 @@ public enum NotificationType
     NewLoginFromUnknownIp,
     MasterPasswordChanged,
     MfaFactorDisabled,
+    AccountRecovered,
+    RecoveryKitInvalidated,
 }

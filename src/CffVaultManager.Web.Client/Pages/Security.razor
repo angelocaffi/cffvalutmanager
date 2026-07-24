@@ -1,7 +1,15 @@
 @page "/security"
 @attribute [Authorize]
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@implements IDisposable
 @inject AuthApiClient AuthApi
 @inject WebAuthnJsInterop WebAuthn
+@inject IDekService DekService
+@inject IRecoveryKeyService RecoveryKeyService
+@inject SessionState Session
+@inject ClipboardJsInterop Clipboard
 
 <PageTitle>Sicurezza</PageTitle>
 
@@ -122,6 +130,80 @@ else
             </div>
         </div>
     </div>
+
+    <div class="card mt-3" style="max-width: 32rem;">
+        <div class="card-body">
+            <h2 class="h5">Kit di recupero</h2>
+            <p class="text-body-secondary small">
+                Una chiave di recupero opzionale, indipendente dalla master password, per non perdere
+                l'accesso al vault se la dimentichi. Viene mostrata <strong>una sola volta</strong>: va
+                salvata offline (stampa, cassaforte). Chiunque la possieda, insieme alla tua email, può
+                bypassare la master password — trattala con la stessa cura.
+            </p>
+
+            @if (_recoveryError is not null)
+            {
+                <div class="alert alert-danger py-2" role="alert">@_recoveryError</div>
+            }
+
+            @if (_revealedRecoveryKey is not null)
+            {
+                <div class="alert alert-warning py-2">
+                    <p class="fw-semibold mb-2">Salva questa chiave ora — non verrà mostrata di nuovo.</p>
+                    <p class="font-monospace user-select-all mb-2">@_revealedRecoveryKey</p>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CopyRecoveryKeyAsync">Copia</button>
+                        <button type="button" class="btn btn-info btn-sm" @onclick="DismissRevealedKey">Ho salvato la chiave</button>
+                    </div>
+                </div>
+            }
+            else if (_profile!.HasRecoveryKit)
+            {
+                <p class="mb-3">
+                    <span class="badge text-bg-success">Attivo</span>
+                    <span class="text-body-secondary small ms-1">generato il @_profile.RecoveryKitGeneratedAt?.LocalDateTime.ToString("g")</span>
+                </p>
+
+                @if (_confirmRegenerate)
+                {
+                    <div class="alert alert-warning py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span>Il kit attuale smetterà di funzionare. Continuare?</span>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-danger btn-sm" disabled="@_recoveryBusy" @onclick="GenerateRecoveryKitAsync">Sì, rigenera</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_recoveryBusy" @onclick="() => _confirmRegenerate = false">Annulla</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-danger" disabled="@_recoveryBusy" @onclick="() => _confirmRegenerate = true">
+                        Rigenera
+                    </button>
+                }
+            }
+            else
+            {
+                @if (_profile!.RecoveryKitGeneratedAt is not null)
+                {
+                    <p class="mb-3"><span class="badge text-bg-warning">Non più valido</span>
+                        <span class="text-body-secondary small ms-1">il kit precedente non è più utilizzabile — generane uno nuovo</span>
+                    </p>
+                }
+                else
+                {
+                    <p class="mb-3"><span class="badge text-bg-secondary">Nessuno</span></p>
+                }
+
+                <button type="button" class="btn btn-info" disabled="@_recoveryBusy" @onclick="GenerateRecoveryKitAsync">
+                    @if (_recoveryBusy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Genera kit di recupero
+                </button>
+            }
+        </div>
+    </div>
 }
 
 @code {
@@ -227,4 +309,66 @@ else
             _busy = false;
         }
     }
+
+    // ---- Recovery kit (see docs/security-model.md#recovery-kit) --------------------------------
+
+    private bool _recoveryBusy;
+    private string? _recoveryError;
+    private bool _confirmRegenerate;
+
+    // Held only long enough to display and let the user copy it; zeroed as soon as the reveal
+    // panel is dismissed or the component is torn down — same discipline as Login.razor's _pendingKek.
+    private byte[]? _pendingRecoveryKeyBytes;
+    private string? _revealedRecoveryKey;
+
+    private async Task GenerateRecoveryKitAsync()
+    {
+        _recoveryError = null;
+        _confirmRegenerate = false;
+        _recoveryBusy = true;
+        try
+        {
+            byte[] dek = Session.RequireDek();
+            byte[] recoveryKey = RecoveryKeyService.GenerateRecoveryKey();
+            byte[] recoveryEncryptedDek = DekService.EncryptDek(dek, recoveryKey).ToBytes();
+            byte[] recoveryAuthHash = RecoveryKeyService.DeriveRecoveryAuthHash(recoveryKey);
+
+            var (success, error) = await AuthApi.GenerateRecoveryKitAsync(recoveryEncryptedDek, recoveryAuthHash);
+            if (!success)
+            {
+                CryptographicOperations.ZeroMemory(recoveryKey);
+                _recoveryError = error;
+                return;
+            }
+
+            _pendingRecoveryKeyBytes = recoveryKey;
+            _revealedRecoveryKey = RecoveryKeyFormatter.Format(recoveryKey);
+            await ReloadProfileAsync();
+        }
+        finally
+        {
+            _recoveryBusy = false;
+        }
+    }
+
+    private async Task CopyRecoveryKeyAsync()
+    {
+        if (_revealedRecoveryKey is not null)
+        {
+            await Clipboard.CopyWithAutoClearAsync(_revealedRecoveryKey, TimeSpan.FromSeconds(60));
+        }
+    }
+
+    private void DismissRevealedKey()
+    {
+        if (_pendingRecoveryKeyBytes is not null)
+        {
+            CryptographicOperations.ZeroMemory(_pendingRecoveryKeyBytes);
+            _pendingRecoveryKeyBytes = null;
+        }
+
+        _revealedRecoveryKey = null;
+    }
+
+    public void Dispose() => DismissRevealedKey();
 }

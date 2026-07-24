@@ -102,6 +102,7 @@ app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
 
 app.MapAuthEndpoints();
+app.MapRecoveryEndpoints();
 app.MapUserEndpoints();
 app.MapAdminEndpoints();
 app.MapVaultEndpoints();

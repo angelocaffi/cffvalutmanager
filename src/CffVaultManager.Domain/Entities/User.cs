@@ -180,6 +180,24 @@ public class User
     /// </summary>
     public byte[]? EncryptedPrivateKey { get; set; }
 
+    /// <summary>
+    /// Wraps the DEK directly with a Recovery Key that is never persisted or seen server-side —
+    /// see docs/security-model.md#recovery-kit. Null until the user generates a kit from
+    /// /security; cleared (along with <see cref="RecoveryKeyHash"/>, not <see cref="RecoveryKitGeneratedAt"/>)
+    /// when consumed by a successful recovery or invalidated by a DEK rotation.
+    /// </summary>
+    public byte[]? RecoveryEncryptedDek { get; set; }
+
+    /// <summary>Server-side proof of Recovery Key possession, re-hashed via IAuthHashHasher exactly like MasterPasswordHash.</summary>
+    public byte[]? RecoveryKeyHash { get; set; }
+
+    /// <summary>
+    /// When the current (or most recently invalidated/consumed) kit was generated. Deliberately
+    /// NOT cleared alongside RecoveryEncryptedDek/RecoveryKeyHash, so /security can distinguish
+    /// "never generated one" from "had one, now invalidated — regenerate" without a fourth column.
+    /// </summary>
+    public DateTimeOffset? RecoveryKitGeneratedAt { get; set; }
+
     public ICollection<OneTimeCode> OneTimeCodes { get; } = new List<OneTimeCode>();
 
     public ICollection<WebAuthnCredential> WebAuthnCredentials { get; } = new List<WebAuthnCredential>();

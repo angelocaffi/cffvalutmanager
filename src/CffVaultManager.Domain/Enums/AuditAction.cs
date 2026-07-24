@@ -33,4 +33,7 @@ public enum AuditAction
     ItemMembershipGranted,
     ItemMembershipRevoked,
     DekRotated,
+    RecoveryKitGenerated,
+    AccountRecovered,
+    RecoveryKitInvalidated,
 }

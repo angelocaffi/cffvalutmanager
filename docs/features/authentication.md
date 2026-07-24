@@ -10,7 +10,7 @@ Garantire che solo il legittimo proprietario di un vault possa sbloccarlo, senza
 - Login: email + master password → derivazione client-side della KEK → sblocco DEK → sessione autenticata.
 - **Logout esplicito e auto-lock** dopo N minuti di inattività (configurabile dall'utente, default 15 min).
 - **Cambio master password**: richiede la password attuale, ri-cifra solo la DEK (vedi [encryption-key-management.md](encryption-key-management.md)).
-- **Recupero accesso**: senza master password non è possibile recuperare i dati (per design zero-knowledge). Offrire eventualmente un meccanismo opzionale di "recovery kit" (chiave di recupero generata all'iscrizione, da salvare offline dall'utente) — da valutare in v2.
+- **Recupero accesso**: senza master password non è possibile recuperare i dati (per design zero-knowledge). Meccanismo opzionale di "recovery kit" — design formalizzato, vedi sezione dedicata sotto.
 - **MFA (Multi-Factor Authentication)**:
   - Fattori supportati:
     - **TOTP** (RFC 6238, Google Authenticator/Authy compatibile) — baseline, fattore consigliato.
@@ -36,6 +36,15 @@ Flusso distinto dall'MFA (attiva l'account, non protegge un login già autentica
 - L'utente abilita esplicitamente l'Email OTP nelle impostazioni di sicurezza; l'indirizzo usato è quello dell'account.
 - Al login, se l'Email OTP è il fattore scelto, il sistema invia il codice e richiede all'utente di inserirlo dopo la verifica della master password.
 - Se l'utente ha registrato sia TOTP sia Email OTP, la UI segnala l'Email OTP come opzione **"meno sicura"** rispetto al TOTP.
+
+### Recovery kit
+
+Design completo (meccanismo, prova di possesso lato server, MFA-gating, invalidazione) in [../security-model.md](../security-model.md#recovery-kit) — qui solo il riepilogo lato utente/prodotto.
+
+- **Opt-in**, generato dalla pagina `/security` (non in registrazione): l'utente genera una Recovery Key a 256 bit, mostrata **una sola volta**, con un avviso esplicito di salvarla offline (non recuperabile in seguito).
+- Per recuperare l'accesso: email + Recovery Key → se l'utente ha MFA attivo va comunque verificato → l'utente sceglie una nuova master password → tutte le sessioni attive vengono revocate e viene inviata una notifica di sicurezza (email + in-app), stesso comportamento già in vigore per il cambio master password.
+- **Monouso**: un kit si consuma dopo un recupero riuscito. Va rigenerato anche dopo una rotazione DEK (`/api/auth/rotate-dek`), che lo invalida automaticamente — la UI di `/security` deve mostrare chiaramente lo stato (nessun kit / kit attivo dal \[data\] / kit invalidato, rigeneralo).
+- Non implementato ancora: design formalizzato, in attesa di piano di implementazione.
 
 ### Recovery MFA via email (backlog v2)
 

@@ -90,6 +90,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IKeyPairService, KeyPairService>();
         services.AddScoped<IChangeMasterPasswordService, ChangeMasterPasswordService>();
         services.AddScoped<IDekRotationService, DekRotationService>();
+        services.AddScoped<IAccountRecoveryService, AccountRecoveryService>();
         services.AddScoped<IEmailVerificationService, EmailVerificationService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<ISecurityNotificationService, SecurityNotificationService>();

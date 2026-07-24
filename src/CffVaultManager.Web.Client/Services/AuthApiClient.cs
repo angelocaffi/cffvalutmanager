@@ -281,6 +281,83 @@ public sealed class AuthApiClient
             ct);
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
+
+    // ---- Recovery kit (see docs/security-model.md#recovery-kit) --------------------------------
+
+    /// <summary>Generates/regenerates a kit for the authenticated caller — overwrites any prior one.</summary>
+    public async Task<(bool Success, string? Error)> GenerateRecoveryKitAsync(byte[] recoveryEncryptedDek, byte[] recoveryAuthHash, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/recovery-kit", new { RecoveryEncryptedDek = recoveryEncryptedDek, RecoveryAuthHash = recoveryAuthHash }, ct);
+        return response.IsSuccessStatusCode ? (true, null) : (false, "Impossibile generare il kit di recupero.");
+    }
+
+    /// <summary>Always returns a fixed-length blob — real or fake, anti-enumeration (see the server-side implementation).</summary>
+    public async Task<byte[]> StartRecoveryAsync(string email, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/recovery/start", new { Email = email }, ct);
+        var result = await response.Content.ReadFromJsonAsync<RecoveryStartResponse>(JsonOptions, ct);
+        return result!.RecoveryEncryptedDek;
+    }
+
+    public async Task<RecoveryVerifyResponse> VerifyRecoveryAsync(string email, byte[] recoveryAuthHash, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/recovery/verify", new { Email = email, RecoveryAuthHash = recoveryAuthHash }, ct);
+        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+    }
+
+    public async Task<RecoveryVerifyResponse> VerifyRecoveryMfaAsync(string challengeToken, string code, string factor, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/recovery/verify-mfa", new { ChallengeToken = challengeToken, Code = code, Factor = factor }, ct);
+        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+    }
+
+    public async Task<bool> SendRecoveryMfaEmailOtpAsync(string challengeToken, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/recovery/mfa/email-otp/send", new { ChallengeToken = challengeToken }, ct);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<string?> BeginRecoveryWebAuthnAssertionAsync(string challengeToken, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/recovery/webauthn/begin", new { ChallengeToken = challengeToken }, ct);
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
+    }
+
+    public async Task<RecoveryVerifyResponse> CompleteRecoveryWebAuthnAssertionAsync(string challengeToken, string assertionResponseJson, CancellationToken ct = default)
+    {
+        using var doc = JsonDocument.Parse(assertionResponseJson);
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/recovery/webauthn/complete",
+            new { ChallengeToken = challengeToken, AssertionResponse = doc.RootElement },
+            ct);
+        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+    }
+
+    /// <summary>Submits the new master password after the recovery flow proved Recovery Key possession (+MFA if enabled).</summary>
+    public async Task<(bool Success, string? Error)> CompleteRecoveryAsync(
+        string recoveryToken,
+        byte[] newAuthHash,
+        byte[] newEncryptedDek,
+        byte[] newMasterPasswordSalt,
+        int newKdfMemoryKb,
+        int newKdfIterations,
+        int newKdfVersion,
+        CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/recovery/complete", new
+        {
+            RecoveryToken = recoveryToken,
+            NewAuthHash = newAuthHash,
+            NewEncryptedDek = newEncryptedDek,
+            NewMasterPasswordSalt = newMasterPasswordSalt,
+            NewKdfMemoryKb = newKdfMemoryKb,
+            NewKdfIterations = newKdfIterations,
+            NewKdfVersion = newKdfVersion,
+        }, ct);
+        return response.IsSuccessStatusCode ? (true, null) : (false, "Impossibile completare il recupero. Il codice o il token potrebbero essere scaduti.");
+    }
 }
 
 public sealed record PreloginResponse(byte[] MasterPasswordSalt, int KdfMemoryKb, int KdfIterations, int KdfVersion);
@@ -298,7 +375,14 @@ public sealed record LoginResponse(
     IReadOnlyList<string>? AvailableMfaFactors,
     CryptoMaterialsResponse? CryptoMaterials);
 
-public sealed record UserProfileResponse(string Email, bool EmailVerified, bool MfaEnabled, bool MfaEmailOtpEnabled, bool HasKeyPair);
+public sealed record UserProfileResponse(
+    string Email,
+    bool EmailVerified,
+    bool MfaEnabled,
+    bool MfaEmailOtpEnabled,
+    bool HasKeyPair,
+    bool HasRecoveryKit,
+    DateTimeOffset? RecoveryKitGeneratedAt);
 
 public sealed record KeyPairResponse(byte[] PublicKey, byte[] EncryptedPrivateKey);
 
@@ -307,3 +391,12 @@ public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateT
 public sealed record ErrorResponse(string? Error);
 
 public sealed record RequestTenantProvisioningResponse(Guid RequestId);
+
+public sealed record RecoveryStartResponse(byte[] RecoveryEncryptedDek);
+
+public sealed record RecoveryVerifyResponse(
+    bool Success,
+    bool RequiresMfa,
+    string? MfaChallengeToken,
+    IReadOnlyList<string>? AvailableMfaFactors,
+    string? RecoveryToken);

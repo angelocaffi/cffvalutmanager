@@ -168,7 +168,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         if (availableFactors.Count > 0)
         {
             await WriteAuditAsync(user, AuditAction.MfaChallenge, ip, userAgent, ct);
-            string challenge = _jwt.CreateMfaChallengeToken(user.Id, MfaChallengeLifetime);
+            string challenge = _jwt.CreateMfaChallengeToken(user.Id, MfaChallengeLifetime, JwtTokenService.MfaChallengePurpose);
             return LoginResult.MfaRequired(challenge, availableFactors);
         }
 

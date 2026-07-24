@@ -19,4 +19,10 @@ public interface ISecurityNotificationService
 
     /// <summary><paramref name="factorDescription"/> is a human-readable label (e.g. "Email OTP", "una passkey") — never a secret.</summary>
     Task NotifyMfaFactorDisabledAsync(Guid userId, string factorDescription, CancellationToken ct = default);
+
+    /// <summary>A recovery kit was successfully used to reset the master password — see docs/security-model.md#recovery-kit.</summary>
+    Task NotifyAccountRecoveredAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>A DEK rotation silently invalidated an existing recovery kit; the user should regenerate one if they still want it.</summary>
+    Task NotifyRecoveryKitInvalidatedAsync(Guid userId, CancellationToken ct = default);
 }
