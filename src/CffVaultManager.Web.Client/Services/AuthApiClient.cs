@@ -282,6 +282,28 @@ public sealed class AuthApiClient
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
 
+    // ---- TOTP (authenticator app) MFA setup ------------------------------------------------------
+
+    /// <summary>
+    /// Starts (or restarts) TOTP enrollment: generates and stores an encrypted, not-yet-active
+    /// secret and returns its <c>otpauth://</c> provisioning URI. Safe to call repeatedly before
+    /// confirming — each call replaces the pending secret, so a scan that never gets confirmed
+    /// never activates MFA.
+    /// </summary>
+    public async Task<string> BeginTotpSetupAsync(CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync("/api/auth/mfa/setup", content: null, ct);
+        var result = await response.Content.ReadFromJsonAsync<TotpSetupResponse>(JsonOptions, ct);
+        return result!.ProvisioningUri;
+    }
+
+    /// <summary>Confirms the first code from the authenticator app, activating TOTP as an MFA factor.</summary>
+    public async Task<bool> ConfirmTotpSetupAsync(string code, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/api/auth/mfa/confirm", new { Code = code }, ct);
+        return response.IsSuccessStatusCode;
+    }
+
     // ---- Recovery kit (see docs/security-model.md#recovery-kit) --------------------------------
 
     /// <summary>Generates/regenerates a kit for the authenticated caller — overwrites any prior one.</summary>
@@ -391,6 +413,8 @@ public sealed record WebAuthnCredentialResponse(Guid Id, string? Nickname, DateT
 public sealed record ErrorResponse(string? Error);
 
 public sealed record RequestTenantProvisioningResponse(Guid RequestId);
+
+public sealed record TotpSetupResponse(string ProvisioningUri);
 
 public sealed record RecoveryStartResponse(byte[] RecoveryEncryptedDek);
 

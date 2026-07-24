@@ -26,6 +26,65 @@ else
 {
     <div class="card" style="max-width: 32rem;">
         <div class="card-body">
+            <h2 class="h5">App authenticator (TOTP)</h2>
+            <p class="text-body-secondary small">
+                Genera codici monouso da un'app authenticator (es. Google Authenticator, Authy) come
+                fattore aggiuntivo insieme alla master password. Non richiede rete né dipende dalla
+                tua casella email — è il fattore consigliato.
+            </p>
+
+            @if (_totpError is not null)
+            {
+                <div class="alert alert-danger py-2" role="alert">@_totpError</div>
+            }
+
+            @if (_profile.MfaEnabled)
+            {
+                <p class="mb-0"><span class="badge text-bg-success">Abilitato</span></p>
+            }
+            else if (_totpProvisioningUri is not null)
+            {
+                <div class="d-flex flex-column align-items-start gap-2 mb-3">
+                    <div class="border rounded p-2 bg-white" style="width: 11rem;">
+                        @((MarkupString)_totpQrSvg!)
+                    </div>
+                    @if (_totpSecret is not null)
+                    {
+                        <p class="small text-body-secondary mb-0">
+                            Non riesci a inquadrare il QR code? Inserisci questo codice manualmente nell'app:
+                            <span class="font-monospace user-select-all d-block">@_totpSecret</span>
+                        </p>
+                    }
+                </div>
+
+                <div class="input-group mb-3" style="max-width: 16rem;">
+                    <input type="text" class="form-control" placeholder="Codice a 6 cifre" inputmode="numeric"
+                           autocomplete="one-time-code" @bind="_totpCode" @bind:event="oninput" disabled="@_totpBusy" />
+                    <button type="button" class="btn btn-info" disabled="@(_totpBusy || string.IsNullOrWhiteSpace(_totpCode))" @onclick="ConfirmTotpAsync">
+                        @if (_totpBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Conferma
+                    </button>
+                </div>
+            }
+            else
+            {
+                <p class="mb-3"><span class="badge text-bg-secondary">Disabilitato</span></p>
+                <button type="button" class="btn btn-info" disabled="@_totpBusy" @onclick="BeginTotpSetupAsync">
+                    @if (_totpBusy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Configura app authenticator
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="card mt-3" style="max-width: 32rem;">
+        <div class="card-body">
             <h2 class="h5">Email OTP come fattore MFA</h2>
             <p class="text-body-secondary small">
                 Quando abilitato, in aggiunta alla master password ti verrà richiesto un codice inviato
@@ -273,6 +332,56 @@ else
     }
 
     private async Task ReloadProfileAsync() => _profile = await AuthApi.GetProfileAsync();
+
+    // ---- TOTP (authenticator app) MFA setup ------------------------------------------------------
+
+    private bool _totpBusy;
+    private string? _totpError;
+    private string? _totpProvisioningUri;
+    private string? _totpQrSvg;
+    private string? _totpSecret;
+    private string _totpCode = string.Empty;
+
+    private async Task BeginTotpSetupAsync()
+    {
+        _totpError = null;
+        _totpBusy = true;
+        try
+        {
+            _totpProvisioningUri = await AuthApi.BeginTotpSetupAsync();
+            _totpQrSvg = TotpQrCodeRenderer.ToSvg(_totpProvisioningUri);
+            _totpSecret = TotpQrCodeRenderer.ExtractSecret(_totpProvisioningUri);
+        }
+        finally
+        {
+            _totpBusy = false;
+        }
+    }
+
+    private async Task ConfirmTotpAsync()
+    {
+        _totpError = null;
+        _totpBusy = true;
+        try
+        {
+            bool confirmed = await AuthApi.ConfirmTotpSetupAsync(_totpCode);
+            if (!confirmed)
+            {
+                _totpError = "Codice non valido. Riprova.";
+                return;
+            }
+
+            _totpProvisioningUri = null;
+            _totpQrSvg = null;
+            _totpSecret = null;
+            _totpCode = string.Empty;
+            await ReloadProfileAsync();
+        }
+        finally
+        {
+            _totpBusy = false;
+        }
+    }
 
     private async Task EnableAsync()
     {
