@@ -38,6 +38,10 @@
                         <li class="nav-item"><NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink></li>
                     }
                     <li class="nav-item"><NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink></li>
+                    @if (Session.Role != "SuperAdmin")
+                    {
+                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/billing" Match="NavLinkMatch.Prefix">Abbonamento</NavLink></li>
+                    }
                 </ul>
                 <div class="d-flex align-items-center gap-3 mt-3 mt-lg-0">
                     <span class="text-white-50 small">@Session.Email</span>

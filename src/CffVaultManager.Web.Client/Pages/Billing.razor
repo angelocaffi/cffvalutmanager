@@ -1,0 +1,175 @@
+@page "/billing"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@using Microsoft.Extensions.Configuration
+@inject BillingApiClient BillingApi
+@inject AuthApiClient AuthApi
+@inject SessionState Session
+@inject PayPalJsInterop PayPal
+@inject IConfiguration Configuration
+
+<PageTitle>Abbonamento</PageTitle>
+
+<h1 class="h3 mb-4">Abbonamento</h1>
+
+@if (_status is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    @if (_status.IsReadOnly)
+    {
+        <div class="alert alert-danger" role="alert">
+            Il periodo di prova è terminato. Il vault è in <strong>sola lettura</strong>: puoi consultare i tuoi
+            secrets ma non crearne o modificarne di nuovi finché non rinnovi.
+        </div>
+    }
+
+    <div class="card" style="max-width: 32rem;">
+        <div class="card-body">
+            <h2 class="h5">Piano attuale</h2>
+            <dl class="row mb-0">
+                <dt class="col-5">Piano</dt>
+                <dd class="col-7">@(_status.PlanName ?? "Gratuito (prova)")</dd>
+
+                @if (_status.PlanExpiresAt is { } expiresAt)
+                {
+                    <dt class="col-5">Scadenza piano</dt>
+                    <dd class="col-7">@expiresAt.LocalDateTime.ToString("d")</dd>
+                }
+                else
+                {
+                    <dt class="col-5">Fine prova gratuita</dt>
+                    <dd class="col-7">@_status.TrialEndsAt.LocalDateTime.ToString("d")</dd>
+                }
+            </dl>
+        </div>
+    </div>
+
+    @if (Session.Role != "Admin")
+    {
+        <p class="text-body-secondary small mt-3">Solo un Admin può avviare o completare un pagamento. Contatta l'Admin della tua organizzazione.</p>
+    }
+    else
+    {
+        <div class="card mt-3" style="max-width: 32rem;">
+            <div class="card-body">
+                <h2 class="h5">Rinnova con PayPal</h2>
+                <p class="text-body-secondary small">
+                    Pagamento singolo, non ricorrente: sblocca 12 mesi di accesso pieno a partire dalla scadenza
+                    attuale (se paghi in anticipo, i mesi si sommano a quelli residui).
+                </p>
+
+                @if (_errorMessage is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                }
+
+                @if (_captureSucceeded)
+                {
+                    <div class="alert alert-success py-2" role="alert">Pagamento completato. Grazie!</div>
+                }
+
+                @if (string.IsNullOrWhiteSpace(_payPalClientId))
+                {
+                    <div class="alert alert-warning py-2" role="alert">Il pagamento non è al momento configurato su questo server.</div>
+                }
+                else
+                {
+                    <div id="@_buttonsContainerId"></div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private BillingStatusResponse? _status;
+    private string? _errorMessage;
+    private bool _captureSucceeded;
+    private bool _buttonsRendered;
+    private readonly string _buttonsContainerId = $"paypal-buttons-{Guid.NewGuid():N}";
+    private string? _payPalClientId;
+    private DotNetObjectReference<Billing>? _dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _payPalClientId = Configuration["PayPal:ClientId"];
+        await ReloadStatusAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_buttonsRendered || _status is null || Session.Role != "Admin" || string.IsNullOrWhiteSpace(_payPalClientId))
+        {
+            return;
+        }
+
+        _buttonsRendered = true;
+        _dotNetRef = DotNetObjectReference.Create(this);
+        await PayPal.RenderButtonsAsync(_buttonsContainerId, _payPalClientId, "EUR", _dotNetRef);
+    }
+
+    private async Task ReloadStatusAsync() => _status = await BillingApi.GetStatusAsync();
+
+    [JSInvokable]
+    public async Task<string> CreateOrderAsync()
+    {
+        _errorMessage = null;
+        var (orderId, error) = await BillingApi.CreateCheckoutAsync();
+        if (orderId is null)
+        {
+            _errorMessage = error;
+            StateHasChanged();
+            throw new InvalidOperationException(error ?? "Impossibile avviare il pagamento.");
+        }
+
+        return orderId;
+    }
+
+    [JSInvokable]
+    public async Task OnApprovedAsync(string orderId)
+    {
+        var (success, _, error) = await BillingApi.CaptureCheckoutAsync(orderId);
+        if (!success)
+        {
+            _errorMessage = error;
+            StateHasChanged();
+            return;
+        }
+
+        _captureSucceeded = true;
+
+        // The tenant_read_only claim (if present) is only dropped from a freshly issued access
+        // token — force a refresh now instead of waiting for TokenRefreshScheduler's next
+        // scheduled renewal, see docs/features/billing.md "Enforcement sola lettura".
+        if (Session.RefreshToken is { } refreshToken)
+        {
+            var refreshed = await AuthApi.RefreshAsync(refreshToken);
+            if (refreshed is { Success: true, AccessToken: not null, RefreshToken: not null })
+            {
+                Session.UpdateTokens(refreshed.AccessToken, refreshed.RefreshToken);
+            }
+        }
+
+        await ReloadStatusAsync();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnErrorAsync(string message)
+    {
+        _errorMessage = message;
+        StateHasChanged();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

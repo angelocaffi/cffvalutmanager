@@ -4,6 +4,7 @@ using CffVaultManager.Crypto.Abstractions;
 using CffVaultManager.Infrastructure.Administration;
 using CffVaultManager.Infrastructure.Audit;
 using CffVaultManager.Infrastructure.Authentication;
+using CffVaultManager.Infrastructure.Billing;
 using CffVaultManager.Infrastructure.Persistence;
 using CffVaultManager.Infrastructure.VaultCore;
 using Fido2NetLib;
@@ -104,6 +105,19 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<AuditLogRetentionHostedService>();
         services.AddScoped<IExternalShareLinkService, ExternalShareLinkService>();
         services.AddScoped<IItemMembershipService, ItemMembershipService>();
+
+        // No safe no-op implementation for payments (see PayPalNotConfiguredException) — the named
+        // HttpClient and IPayPalClient itself are only registered when credentials are actually
+        // configured, same "empty string = not configured" convention as SmtpEmailSender above.
+        // BillingService's optional IPayPalClient? constructor param resolves to null otherwise.
+        if (!string.IsNullOrWhiteSpace(configuration["PayPal:ClientId"]) && !string.IsNullOrWhiteSpace(configuration["PayPal:ClientSecret"]))
+        {
+            services.AddHttpClient(PayPalClient.HttpClientName, client =>
+                client.BaseAddress = new Uri(configuration["PayPal:BaseUrl"] ?? "https://api-m.sandbox.paypal.com"));
+            services.AddSingleton<IPayPalClient, PayPalClient>();
+        }
+
+        services.AddScoped<IBillingService, BillingService>();
 
         return services;
     }

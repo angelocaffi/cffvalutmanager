@@ -36,4 +36,5 @@ public enum AuditAction
     RecoveryKitGenerated,
     AccountRecovered,
     RecoveryKitInvalidated,
+    PaymentCaptured,
 }

@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 
@@ -14,7 +15,7 @@ internal static class ExternalShareLinkEndpoints
 {
     public static IEndpointRouteBuilder MapExternalShareLinkEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/vaults/{vaultId:guid}/items/{itemId:guid}/share-links").RequireAuthorization();
+        var group = app.MapGroup("/api/vaults/{vaultId:guid}/items/{itemId:guid}/share-links").RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         group.MapPost("", (Guid vaultId, Guid itemId, CreateExternalShareLinkRequest request, IExternalShareLinkService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>

@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 
@@ -11,7 +12,7 @@ internal static class FoldersEndpoints
 {
     public static IEndpointRouteBuilder MapFolderEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/vaults/{vaultId:guid}/folders").RequireAuthorization();
+        var group = app.MapGroup("/api/vaults/{vaultId:guid}/folders").RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         group.MapPost("", (Guid vaultId, CreateFolderRequest request, IFolderService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>

@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 
@@ -21,7 +22,7 @@ internal static class ItemMembershipEndpoints
             {
                 var membership = await service.ShareAsync(vaultId, itemId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, request, ct);
                 return Results.Created($"/api/items/{itemId}/memberships/{membership.Id}", membership);
-            })).RequireAuthorization();
+            })).RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         app.MapPost("/api/items/{itemId:guid}/memberships", (
             Guid itemId, AddItemMemberRequest request, IItemMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
@@ -29,7 +30,7 @@ internal static class ItemMembershipEndpoints
             {
                 var membership = await service.AddMemberAsync(itemId, tenantContext.UserId!.Value, tenantContext.TenantId!.Value, request, ct);
                 return Results.Created($"/api/items/{itemId}/memberships/{membership.Id}", membership);
-            })).RequireAuthorization();
+            })).RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         app.MapPost("/api/items/{itemId:guid}/memberships/{userId:guid}/revoke", (
             Guid itemId, Guid userId, RevokeItemMemberRequest request, IItemMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
@@ -42,7 +43,7 @@ internal static class ItemMembershipEndpoints
 
                 await service.RevokeAsync(itemId, tenantContext.UserId!.Value, request, ct);
                 return Results.NoContent();
-            })).RequireAuthorization();
+            })).RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         app.MapGet("/api/items/{itemId:guid}/memberships", (Guid itemId, IItemMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
@@ -65,7 +66,7 @@ internal static class ItemMembershipEndpoints
             {
                 await service.UpdateSharedItemAsync(itemId, tenantContext.UserId!.Value, request, ct);
                 return Results.NoContent();
-            })).RequireAuthorization();
+            })).RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         return app;
     }

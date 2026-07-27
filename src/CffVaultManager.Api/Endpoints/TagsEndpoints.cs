@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 
@@ -11,7 +12,7 @@ internal static class TagsEndpoints
 {
     public static IEndpointRouteBuilder MapTagEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/vaults/{vaultId:guid}/tags").RequireAuthorization();
+        var group = app.MapGroup("/api/vaults/{vaultId:guid}/tags").RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         group.MapPost("", (Guid vaultId, CreateTagRequest request, ITagService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>

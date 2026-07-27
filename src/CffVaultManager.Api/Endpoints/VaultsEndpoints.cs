@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 using CffVaultManager.Domain.Enums;
@@ -29,7 +30,7 @@ internal static class VaultsEndpoints
             var vault = await service.CreateOrganizationVaultAsync(
                 tenantContext.UserId!.Value, tenantContext.TenantId!.Value, request, ct);
             return Results.Created($"/api/vaults/{vault.Id}", vault);
-        }).RequireAuthorization(policy => policy.RequireRole(nameof(UserRole.Admin)));
+        }).RequireAuthorization(policy => policy.RequireRole(nameof(UserRole.Admin))).AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         return app;
     }

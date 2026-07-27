@@ -102,6 +102,15 @@ Il password health check (vedi [features/password-health.md](features/password-h
 
 `TenantBillingProfile` (vedi [data-model.md](data-model.md#tenantbillingprofile-tenant-scoped-11-con-tenant), raccolto nel flusso di provisioning gated in [multi-tenancy.md](multi-tenancy.md#provisioning-di-un-nuovo-tenant)) persiste in chiaro dati anagrafici/fiscali dell'organizzazione (ragione sociale, indirizzo, Partita IVA/Codice Fiscale, Codice Destinatario SDI/PEC). Questo **non è un'eccezione al principio zero-knowledge**: questi dati non sono mai stati un secret applicativo, sono metadati di business nella stessa classe di fiducia di `Tenant.Name`/`Slug`/`PlanName`, già oggi in chiaro e già oggi visibili a un SuperAdmin per operazioni amministrative (vedi [multi-tenancy.md](multi-tenancy.md#ruoli--riepilogo), "solo metadati amministrativi"). Non vanno mai confusi con — né usati per derivare — materiale crittografico: `TenantProvisioningRequest` porta entrambe le categorie di dati nella stessa riga pending solo perché nascono nella stessa sottomissione, ma restano concettualmente separate (una promossa a `TenantBillingProfile`, l'altra a `User.EncryptedDek`/`MasterPasswordSalt`). Un eventuale addebito reale (fuori scope finché non si sceglie un processore) non deve mai transitare né essere derivato da questi campi da solo — richiederà comunque un consenso esplicito e un metodo di pagamento a parte.
 
+## Integrazione pagamento (PayPal)
+
+Design completo in [features/billing.md](features/billing.md). Punti rilevanti per il modello di minaccia:
+
+- **L'importo addebitato è sempre deciso lato server** (configurazione, mai un valore accettato nel body di `POST /api/billing/checkout`) — altrimenti un client malevolo potrebbe creare un ordine PayPal per un importo arbitrariamente basso e ottenere comunque l'estensione piano.
+- **`PayPal:ClientSecret` non lascia mai il server**: solo `PayPal:ClientId` (pubblico per design, richiesto dall'SDK JS di PayPal) raggiunge `Web.Client`. Stessa disciplina già in vigore per `Jwt:SigningKey`/credenziali SMTP — mai in un file committato, solo user-secrets/variabili d'ambiente.
+- **Nessuna eccezione zero-knowledge**: importo, valuta, PayPalOrderId e stato del pagamento non sono mai stati un secret applicativo — stessa classe di fiducia di `TenantBillingProfile` (vedi sopra), non richiedono nuova crittografia né bypassano alcun query filter.
+- **Enforcement sola-lettura fail-open deliberato sul singolo access token**: il claim `tenant_read_only` viene deciso al login/refresh, non per singola richiesta — un pagamento catturato durante la vita di un token già emesso (pochi minuti) non lo sblocca istantaneamente. Accettato per lo stesso motivo già documentato per la sospensione tenant e la revoca sessioni: nessuna blocklist server-side per JWT stateless già emessi; il client forza un refresh subito dopo una cattura riuscita per non far percepire il ritardo.
+
 ## Checklist di revisione sicurezza (da applicare a ogni feature che tocca secrets)
 
 - [ ] Il dato sensibile è cifrato prima di toccare il livello di persistenza?

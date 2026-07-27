@@ -12,9 +12,10 @@ public interface IJwtTokenService
 {
     /// <summary>
     /// Creates a full access JWT (<c>sub</c>, <c>tenant_id</c> unless null, <c>role</c>, <c>jti</c>,
-    /// <c>iat</c>/<c>exp</c>, optional <c>purpose</c>).
+    /// <c>iat</c>/<c>exp</c>, optional <c>purpose</c>, optional <c>tenant_read_only</c> when
+    /// <paramref name="isReadOnly"/> is true — see docs/features/billing.md).
     /// </summary>
-    string CreateAccessToken(Guid userId, Guid? tenantId, UserRole role, TimeSpan lifetime, string? purpose = null);
+    string CreateAccessToken(Guid userId, Guid? tenantId, UserRole role, TimeSpan lifetime, string? purpose = null, bool isReadOnly = false);
 
     /// <summary>
     /// Creates a short-lived challenge JWT carrying only <c>sub</c> and <c>purpose</c> (e.g.

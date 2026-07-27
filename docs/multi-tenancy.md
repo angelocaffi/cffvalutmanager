@@ -82,6 +82,8 @@ Un SuperAdmin può ancora creare un tenant direttamente, senza passare dalla ric
 
 I dati anagrafici raccolti allo step 1 sono lo scopo esplicito di questo gate oltre alla verifica email: renderli disponibili senza doverli richiedere una seconda volta quando in futuro verrà introdotto un piano a pagamento — selezione piano, addebito e generazione fattura potranno leggere `TenantBillingProfile` senza un nuovo modulo di raccolta dati. **Fuori scope in questa fase**: l'integrazione con un processore di pagamento (da decidere) e la generazione effettiva di ricevute/fatture — qui si formalizzano solo il modello dati e il punto del flusso in cui i dati vengono raccolti.
 
+L'integrazione di pagamento è ora formalizzata separatamente in [features/billing.md](features/billing.md): il tenant nasce sempre gratuito con 30 giorni di prova (`Tenant.TrialEndsAt`), il pagamento (PayPal, singolo, non ricorrente) avviene **dopo** il provisioning da un Admin già autenticato, non durante il signup.
+
 ## Scalabilità
 
 - **API**: stateless, scalabile orizzontalmente dietro load balancer (nessuna sessione in-memory grazie a JWT + refresh token).

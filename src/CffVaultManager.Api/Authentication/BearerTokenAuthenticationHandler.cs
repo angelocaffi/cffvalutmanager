@@ -58,6 +58,11 @@ internal sealed class BearerTokenAuthenticationHandler : AuthenticationHandler<A
             identity.AddClaim(new Claim(TenantClaimTypes.TenantId, tenantId.ToString()));
         }
 
+        if (claims.IsReadOnly)
+        {
+            identity.AddClaim(new Claim(TenantClaimTypes.ReadOnly, "true"));
+        }
+
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, SchemeName);
         return AuthenticateResult.Success(ticket);

@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 using CffVaultManager.Domain.Enums;
@@ -13,7 +14,7 @@ internal static class VaultItemsEndpoints
 {
     public static IEndpointRouteBuilder MapVaultItemEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/vaults/{vaultId:guid}/items").RequireAuthorization();
+        var group = app.MapGroup("/api/vaults/{vaultId:guid}/items").RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         group.MapPost("", (Guid vaultId, CreateVaultItemRequest request, IVaultItemService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>

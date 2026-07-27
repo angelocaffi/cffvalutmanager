@@ -115,6 +115,7 @@ app.MapWebAuthnEndpoints();
 app.MapExternalShareLinkEndpoints();
 app.MapItemMembershipEndpoints();
 app.MapNotificationEndpoints();
+app.MapBillingEndpoints();
 
 app.Run();
 

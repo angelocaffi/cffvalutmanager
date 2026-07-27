@@ -58,6 +58,14 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
             // Swap the real (logging-only) email sender for a fake the test can read back from.
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(EmailSender);
+
+            // Removed unconditionally (rather than relying on config-key overrides above) so tests
+            // never depend on, or make live calls with, real PayPal sandbox credentials that
+            // happen to be present in the developer machine's own user-secrets for the real Api
+            // project — Development-environment test hosts load those too, and user-secrets can
+            // outrank an in-memory config override depending on provider ordering.
+            // BillingEndpointsTests swaps in its own FakePayPalClient per-test where needed.
+            services.RemoveAll<IPayPalClient>();
         });
     }
 

@@ -11,7 +11,24 @@ Entità principali (nomi indicativi, da raffinare in fase di implementazione). T
 | Slug | identificativo univoco, usato per risoluzione tenant al login |
 | Status | enum: `Active`, `Suspended`, `PendingSetup` |
 | Plan / Limits | piano, limiti utenti/storage (se previsto un modello a pacchetti) |
+| TrialEndsAt | `CreatedAt` + 30 giorni, impostato al provisioning — vedi [features/billing.md](features/billing.md) |
+| PlanExpiresAt | nullable, esteso di 365 giorni ad ogni pagamento catturato — vedi [features/billing.md](features/billing.md) |
 | CreatedAt | |
+
+## PaymentTransaction **[tenant-scoped]**
+
+Un tentativo di pagamento PayPal (singolo, non ricorrente) — vedi [features/billing.md](features/billing.md).
+
+| Campo | Note |
+|---|---|
+| Id | GUID |
+| TenantId | FK a Tenant |
+| CreatedByUserId | FK a User, sempre un `Admin` |
+| PayPalOrderId | indice univoco, usato per idempotenza della cattura |
+| Amount / Currency | decisi lato server alla creazione ordine, mai dal client |
+| Status | enum: `Created`, `Captured`, `Failed` |
+| CreatedAt / CapturedAt | `CapturedAt` nullable |
+| PlanExpiresAtAfterCapture | copia storica di `Tenant.PlanExpiresAt` al momento della cattura |
 
 ## TenantBillingProfile **[tenant-scoped, 1:1 con Tenant]**
 

@@ -45,7 +45,7 @@ internal sealed class JwtTokenService : IJwtTokenService
         _signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
     }
 
-    public string CreateAccessToken(Guid userId, Guid? tenantId, UserRole role, TimeSpan lifetime, string? purpose = null)
+    public string CreateAccessToken(Guid userId, Guid? tenantId, UserRole role, TimeSpan lifetime, string? purpose = null, bool isReadOnly = false)
     {
         var claims = new Dictionary<string, object>
         {
@@ -62,6 +62,14 @@ internal sealed class JwtTokenService : IJwtTokenService
         if (purpose is not null)
         {
             claims["purpose"] = purpose;
+        }
+
+        // Optional claim, same pattern as tenant_id above — see docs/features/billing.md
+        // "Enforcement sola lettura". Absent entirely when false, so existing tokens/tests that
+        // never set it are unaffected.
+        if (isReadOnly)
+        {
+            claims["tenant_read_only"] = "true";
         }
 
         return CreateToken(claims, lifetime);
@@ -134,8 +142,9 @@ internal sealed class JwtTokenService : IJwtTokenService
 
         Guid? tenantId = Guid.TryParse(GetString(claims, "tenant_id"), out var tid) ? tid : null;
         UserRole? role = Enum.TryParse<UserRole>(GetString(claims, "role"), out var r) ? r : null;
+        bool isReadOnly = string.Equals(GetString(claims, "tenant_read_only"), "true", StringComparison.Ordinal);
 
-        return new JwtClaims(userId, tenantId, role, purpose);
+        return new JwtClaims(userId, tenantId, role, purpose, isReadOnly);
     }
 
     private string CreateToken(Dictionary<string, object> claims, TimeSpan lifetime)

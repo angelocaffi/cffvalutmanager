@@ -1,3 +1,4 @@
+using CffVaultManager.Api.Authorization;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.VaultCore;
 
@@ -57,7 +58,7 @@ internal static class VaultMembershipsEndpoints
             }
         }).RequireAuthorization();
 
-        var group = app.MapGroup("/api/vaults/{vaultId:guid}/memberships").RequireAuthorization();
+        var group = app.MapGroup("/api/vaults/{vaultId:guid}/memberships").RequireAuthorization().AddEndpointFilter<ReadOnlyEnforcementFilter>();
 
         // Owner-only, enforced inside VaultMembershipService.InviteAsync — not a tenant role gate.
         group.MapPost("", (Guid vaultId, CreateMembershipRequest request, IVaultMembershipService service, ITenantContext tenantContext, CancellationToken ct) =>

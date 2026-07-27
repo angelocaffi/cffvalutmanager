@@ -45,6 +45,8 @@ builder.Services.AddScoped<VaultApiClient>();
 builder.Services.AddScoped<AuditApiClient>();
 builder.Services.AddScoped<AdminApiClient>();
 builder.Services.AddScoped<NotificationApiClient>();
+builder.Services.AddScoped<BillingApiClient>();
+builder.Services.AddScoped<PayPalJsInterop>();
 builder.Services.AddScoped<ShareLinkApiClient>();
 builder.Services.AddScoped<ItemSharingApiClient>();
 builder.Services.AddScoped<ItemKeyResolver>();

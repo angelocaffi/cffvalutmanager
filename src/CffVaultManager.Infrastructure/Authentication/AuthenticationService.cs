@@ -335,7 +335,8 @@ internal sealed class AuthenticationService : IAuthenticationService
             return LoginResult.Failure("Tenant is suspended.");
         }
 
-        string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime);
+        bool isReadOnly = await IsTenantReadOnlyAsync(user.TenantId, ct);
+        string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime, isReadOnly: isReadOnly);
         var materials = new CryptoMaterials(
             user.EncryptedDek,
             user.MasterPasswordSalt,
@@ -360,7 +361,8 @@ internal sealed class AuthenticationService : IAuthenticationService
             await _securityNotifications.NotifyLoginIfNewIpAsync(user.Id, ip, userAgent, ct);
         }
 
-        string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime);
+        bool isReadOnly = await IsTenantReadOnlyAsync(user.TenantId, ct);
+        string access = _jwt.CreateAccessToken(user.Id, user.TenantId, user.Role, AccessTokenLifetime, isReadOnly: isReadOnly);
         var refresh = await _refreshTokens.IssueAsync(user.Id, ip, userAgent, ct);
 
         user.LastLoginAt = DateTimeOffset.UtcNow;
@@ -414,6 +416,30 @@ internal sealed class AuthenticationService : IAuthenticationService
             .FirstOrDefaultAsync(ct);
 
         return status == TenantStatus.Suspended;
+    }
+
+    // SuperAdmin (TenantId == null) is never subject to read-only enforcement either. Computed
+    // once here rather than per-request (see docs/features/billing.md "Enforcement sola lettura")
+    // — the resulting claim goes stale until the token's next refresh, an accepted tradeoff.
+    private async Task<bool> IsTenantReadOnlyAsync(Guid? tenantId, CancellationToken ct)
+    {
+        if (tenantId is null)
+        {
+            return false;
+        }
+
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .Where(t => t.Id == tenantId)
+            .Select(t => new { t.TrialEndsAt, t.PlanExpiresAt })
+            .FirstOrDefaultAsync(ct);
+
+        if (tenant is null)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        return now > tenant.TrialEndsAt && (tenant.PlanExpiresAt is null || now > tenant.PlanExpiresAt);
     }
 
     private async Task WriteAuditAsync(User user, AuditAction action, string? ip, string? userAgent, CancellationToken ct)
