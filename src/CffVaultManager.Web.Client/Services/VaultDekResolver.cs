@@ -16,7 +16,7 @@ namespace CffVaultManager.Web.Client.Services;
 /// (effectively the whole app session, like <see cref="SessionState"/>) so navigating between a
 /// vault's items/detail/trash/backup pages doesn't re-fetch and re-unwrap on every page.
 /// </remarks>
-public sealed class VaultDekResolver
+public sealed class VaultDekResolver : IDisposable
 {
     private readonly VaultMembershipApiClient _membershipApi;
     private readonly SessionState _session;
@@ -28,7 +28,25 @@ public sealed class VaultDekResolver
         _membershipApi = membershipApi;
         _session = session;
         _itemKeyResolver = itemKeyResolver;
+        _session.Changed += OnSessionChanged;
     }
+
+    // Each cached personal-vault VaultAccess.Dek is the very same byte[] SessionState holds as its
+    // own _dek (see ResolveAsync below) — SessionState.Clear() zeroes that array in place on
+    // logout, so without this, a cache entry left over from a prior session would hand back an
+    // all-zero key after the next login (e.g. right after completing account recovery in the same
+    // tab), making every item in that vault fail to decrypt until a hard refresh rebuilt this whole
+    // DI scope from scratch. Only reacts to the logout edge (IsUnlocked false): a login or a silent
+    // token refresh also raises Changed, but neither should touch an otherwise-valid cache.
+    private void OnSessionChanged()
+    {
+        if (!_session.IsUnlocked)
+        {
+            _cache.Clear();
+        }
+    }
+
+    public void Dispose() => _session.Changed -= OnSessionChanged;
 
     public async Task<VaultAccess> ResolveAsync(Guid vaultId, CancellationToken ct = default)
     {
