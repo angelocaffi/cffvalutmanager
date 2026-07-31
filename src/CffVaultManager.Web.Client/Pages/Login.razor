@@ -13,13 +13,20 @@
 
 <PageTitle>Accedi</PageTitle>
 
-<div class="login-shell d-flex justify-content-center">
-    <div class="card shadow-sm login-card">
-        <div class="card-body p-4">
-            <div class="text-center mb-4">
-                <img src="/CffVaultmanager-full.svg" alt="CffVaultManager" class="login-logo mb-2" />
-                <h1 class="h4 mb-0 text-primary">Accedi al tuo vault</h1>
+<div class="auth-shell">
+    <div class="auth-panel">
+        <div class="auth-brand-panel d-none d-lg-flex">
+            <div class="auth-brand-panel-content">
+                <BrandMark IconClass="auth-brand-icon mb-2 d-block mx-auto" TextClass="auth-brand-text d-block" />
+                <p class="auth-brand-tagline">La cassaforte delle tue password: cifrata prima ancora di lasciare il browser, zero-knowledge dal primo carattere.</p>
             </div>
+        </div>
+        <div class="auth-form-panel">
+            <div class="auth-form-panel-inner">
+                <div class="d-flex align-items-center justify-content-center gap-2 mb-3 d-lg-none">
+                    <BrandMark IconClass="login-logo" TextClass="fs-5" />
+                </div>
+                <h1 class="h4 mb-4 text-primary text-center">Accedi al tuo vault</h1>
 
             @if (_stage == Stage.Credentials)
             {
@@ -174,6 +181,7 @@
                     }
                 </form>
             }
+            </div>
         </div>
     </div>
 </div>

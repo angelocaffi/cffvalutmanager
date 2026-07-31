@@ -342,42 +342,133 @@ a.card:hover {
     height: 2rem;
 }
 
-/* ---- Auth pages (Login.razor / Register.razor) ----------------------------------------------- */
+/* ---- Brand mark (Shared/BrandMark.razor) ------------------------------------------------------
+ * One shared icon+wordmark lockup used by the navbar and every auth page, instead of each one
+ * hardcoding its own <img>+<span> (see CLAUDE.md task notes on why CffVaultmanager-full.svg — a
+ * raster PNG with "CffVaultManager" baked into its pixels — can't be reused for the "CffVault"
+ * rebrand: it's not editable via markup/CSS). Sizing is intentionally left to the caller's
+ * IconClass/TextClass, since the mark is reused at three very different scales (navbar, compact
+ * mobile auth header, large auth brand panel). */
 
-.login-shell {
+.brand-mark-icon {
+    height: 2rem;
+    width: auto;
+}
+
+.brand-mark-text-cff {
+    font-weight: 700;
+}
+
+.brand-mark-text-vault {
+    font-weight: 500;
+}
+
+/* ---- Auth pages (Login.razor / Register.razor / Recovery.razor) -------------------------------
+ * Keeper-style split screen: a brand panel (navy → teal gradient) beside the actual form, both
+ * wrapped in one `.auth-panel` that alone carries the shadow/radius — the two halves read as a
+ * single surface, not two stacked cards. `.auth-panel` doesn't set align-items, so it defaults to
+ * stretch: the brand panel always matches the height of whichever side is taller (relevant for
+ * Register.razor's much longer form) instead of leaving a gap. Below lg the brand panel is
+ * `d-none d-lg-flex` in markup and the compact BrandMark inside the form panel becomes the only
+ * brand cue, keeping the page usable as a single centered card on mobile. */
+
+.auth-shell {
     display: flex;
+    min-height: calc(100vh - 8rem);
     align-items: center;
     justify-content: center;
-    min-height: calc(100vh - 8rem);
     margin-top: 1rem;
-    position: relative;
-    isolation: isolate;
 }
 
-.login-shell::before {
-    content: "";
-    position: absolute;
-    inset: -3rem -2rem auto -2rem;
-    height: 22rem;
-    background: radial-gradient(60% 60% at 50% 0%, rgba(var(--brand-teal-rgb), 0.16), transparent 70%);
-    z-index: -1;
-    pointer-events: none;
-}
-
-.login-card {
+.auth-panel {
+    display: flex;
     width: 100%;
-    max-width: 25rem;
-    border: none;
+    max-width: 62rem;
+    border-radius: var(--bs-border-radius-lg);
+    overflow: hidden;
     box-shadow: 0 1rem 2.5rem -1rem rgba(var(--brand-navy-rgb), 0.28), 0 0.25rem 0.75rem -0.25rem rgba(var(--brand-navy-rgb), 0.12);
 }
 
-[data-bs-theme="dark"] .login-card {
+[data-bs-theme="dark"] .auth-panel {
     box-shadow: 0 1rem 2.5rem -1rem rgba(0, 0, 0, 0.6), 0 0.25rem 0.75rem -0.25rem rgba(0, 0, 0, 0.35);
 }
 
-.login-logo {
-    height: 3.5rem;
+.auth-brand-panel {
+    flex: 0 0 38%;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    overflow: hidden;
+    background: linear-gradient(160deg, var(--brand-navy) 0%, var(--brand-teal) 100%);
+}
+
+/* Faint oversized shield in the corner — same watermark idea as body::before, scaled up and
+   cropped for a tighter, more deliberate composition than a centered repeat would give here. */
+.auth-brand-panel::before {
+    content: "";
+    position: absolute;
+    inset: -15% -25% auto auto;
+    width: 24rem;
+    height: 24rem;
+    background: url("CffVaultmanager.svg") no-repeat center / contain;
+    opacity: 0.1;
+    transform: rotate(-10deg);
+    pointer-events: none;
+}
+
+.auth-brand-panel-content {
+    position: relative;
+    max-width: 20rem;
+    text-align: center;
+    color: #fff;
+}
+
+.auth-brand-icon {
+    height: 4rem;
     width: auto;
+    filter: drop-shadow(0 0.5rem 1rem rgba(0, 0, 0, 0.25));
+}
+
+.auth-brand-text {
+    font-size: 1.65rem;
+    color: #fff;
+}
+
+.auth-brand-tagline {
+    margin: 1rem 0 0;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.auth-form-panel {
+    flex: 1 1 26rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--brand-surface);
+    padding: 2.5rem 2rem;
+}
+
+.auth-form-panel-inner {
+    width: 100%;
+    max-width: 25rem;
+}
+
+.login-logo {
+    height: 2.75rem;
+    width: auto;
+}
+
+@media (max-width: 991.98px) {
+    .auth-panel {
+        box-shadow: 0 0.5rem 1.5rem -0.5rem rgba(var(--brand-navy-rgb), 0.25);
+    }
+
+    .auth-form-panel {
+        padding: 2rem 1.25rem;
+    }
 }
 
 /* ---- Vault tiles (Vault.razor) ---------------------------------------------------------------- */

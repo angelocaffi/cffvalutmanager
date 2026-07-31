@@ -1,0 +1,12 @@
+<img src="/CffVaultmanager.svg" alt="CffVault" class="brand-mark-icon @IconClass" />
+<span class="brand-mark-text @TextClass"><span class="brand-mark-text-cff">Cff</span><span class="brand-mark-text-vault">Vault</span></span>
+
+@code {
+    /// <summary>Extra classes for the icon (sizing, spacing) — layout-dependent, so left to the caller.</summary>
+    [Parameter]
+    public string? IconClass { get; set; }
+
+    /// <summary>Extra classes for the wordmark span, same reasoning as <see cref="IconClass"/>.</summary>
+    [Parameter]
+    public string? TextClass { get; set; }
+}

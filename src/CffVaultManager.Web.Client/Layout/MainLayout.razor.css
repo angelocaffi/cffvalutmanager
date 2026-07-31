@@ -1,5 +1,5 @@
 .app-navbar {
-    background-color: var(--brand-navy);
+    background: linear-gradient(95deg, var(--brand-navy) 0%, var(--brand-navy) 55%, #0d5773 130%);
 }
 
 .app-logo {

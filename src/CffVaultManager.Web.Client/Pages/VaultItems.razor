@@ -98,8 +98,34 @@ else
                     @foreach (var item in visible)
                     {
                         var summary = _summaries.GetValueOrDefault(item.Id) ?? new DecryptedSummary("(non decifrabile)", null);
-                        <button type="button" class="vault-row @(_selectedId == item.Id ? "active" : null)" @onclick="() => SelectAsync(item)">
-                            <span class="badge text-bg-secondary vault-row-badge">@TypeLabel(item.Type)</span>
+                        @* Not a <button>: it hosts its own nested <button>/<a> quick actions, and
+                           interactive content can't nest inside a native <button> — role="button"
+                           + tabindex + the keydown handler below keep it keyboard-operable instead. *@
+                        <div class="vault-row @(_selectedId == item.Id ? "active" : null)" role="button" tabindex="0"
+                             @onclick="() => SelectAsync(item)"
+                             @onkeydown="@(async e => { if (e.Key is "Enter" or " ") { await SelectAsync(item); } })">
+                            <span class="vault-row-icon vault-row-icon-@IconSlug(item.Type)" title="@TypeLabel(item.Type)">
+                                @if (item.Type == VaultItemTypes.Password)
+                                {
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3.75 3.75 0 1 1-3.675 4.5H4.5v3h2.25v3H9v-3h1.5l1.575-1.575A3.75 3.75 0 0 1 15.75 5.25Z" /><circle cx="16.5" cy="9" r="0.75" fill="currentColor" stroke="none" /></svg>
+                                }
+                                else if (item.Type == VaultItemTypes.CreditCard)
+                                {
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1.5" /><path d="M3 10h18M6.5 14.5h3" /></svg>
+                                }
+                                else if (item.Type == VaultItemTypes.CryptoWallet)
+                                {
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3.75 7.5A1.5 1.5 0 0 1 5.25 6h12a1.5 1.5 0 0 1 1.5 1.5v1.25h-3.25a2.25 2.25 0 0 0 0 4.5h3.25v1.25a1.5 1.5 0 0 1-1.5 1.5h-12a1.5 1.5 0 0 1-1.5-1.5v-7Z" /><circle cx="15.5" cy="10.75" r="0.75" fill="currentColor" stroke="none" /></svg>
+                                }
+                                else if (item.Type == VaultItemTypes.SecureNote)
+                                {
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path stroke-linejoin="round" d="M6.75 3.75h7.5l4 4v12a1 1 0 0 1-1 1h-10.5a1 1 0 0 1-1-1V4.75a1 1 0 0 1 1-1Z" /><path d="M9 12h6M9 15.5h6M9 8.5h3" /></svg>
+                                }
+                                else
+                                {
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.75c-3 0-4.5 1.5-4.5 3.375 0 1.5.9 2.325 1.988 3.169C10.462 11.006 11.25 11.7 11.25 13.125V14.25M12 17.25v.75" /><circle cx="12" cy="12" r="8.25" /></svg>
+                                }
+                            </span>
                             <span class="vault-row-text">
                                 <span class="vault-row-title">@summary.Title</span>
                                 @if (!string.IsNullOrEmpty(summary.Subtitle))
@@ -111,7 +137,24 @@ else
                             {
                                 <span class="vault-row-star" title="Preferito">★</span>
                             }
-                        </button>
+                            <span class="vault-row-actions" @onclick:stopPropagation="true">
+                                @if (!string.IsNullOrEmpty(summary.QuickUsername))
+                                {
+                                    <button type="button" class="vault-row-action" title="Copia username" @onclick="() => CopyAsync(summary.QuickUsername)">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8.25" r="3" /><path stroke-linecap="round" d="M5.25 19.5a6.75 6.75 0 0 1 13.5 0" /></svg>
+                                    </button>
+                                }
+                                @if (!string.IsNullOrEmpty(summary.QuickPassword))
+                                {
+                                    <button type="button" class="vault-row-action" title="Copia password" @onclick="() => CopySensitiveQuickAsync(item.Id, summary.QuickPassword)">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3.75 3.75 0 1 1-3.675 4.5H4.5v3h2.25v3H9v-3h1.5l1.575-1.575A3.75 3.75 0 0 1 15.75 5.25Z" /><circle cx="16.5" cy="9" r="0.75" fill="currentColor" stroke="none" /></svg>
+                                    </button>
+                                }
+                                <a class="vault-row-action" title="Apri" href="@ItemUrl(item.Id)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5h6v6M19.5 4.5 10 14M9 4.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 19.5h12a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>
+                                </a>
+                            </span>
+                        </div>
                     }
                 </div>
             }
@@ -370,7 +413,11 @@ else
         }
     }
 
-    private static DecryptedSummary FromPassword(PasswordPayload payload) => new(payload.Title, payload.Username);
+    // QuickUsername/QuickPassword back the hover "copy" actions in the row list — no extra
+    // decryption cost, since Summarize() already fully decrypts the payload above just to read
+    // Title/Subtitle out of it; this only keeps two more fields already sitting in memory.
+    private static DecryptedSummary FromPassword(PasswordPayload payload) =>
+        new(payload.Title, payload.Username, payload.Username, payload.Password);
 
     private static DecryptedSummary FromCreditCard(CreditCardPayload payload)
     {
@@ -522,6 +569,20 @@ else
         await Clipboard.CopyWithAutoClearAsync(value);
     }
 
+    // Same as CopySensitiveAsync, but for the row list's hover "copy password" action, which can
+    // fire on any visible row — not just the currently selected/opened one — so the item id has
+    // to be passed in explicitly instead of read off _selectedId.
+    private async Task CopySensitiveQuickAsync(Guid itemId, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        await VaultApi.RecordRevealAsync(VaultId, itemId);
+        await Clipboard.CopyWithAutoClearAsync(value);
+    }
+
     private static string Mask(string? value) => string.IsNullOrEmpty(value) ? "—" : new string('•', Math.Min(value.Length, 16));
 
     private async Task MoveToFolderAsync(VaultItemResponse item, string? folderIdText)
@@ -602,9 +663,18 @@ else
         _ => type,
     };
 
+    private static string IconSlug(string type) => type switch
+    {
+        VaultItemTypes.Password => "password",
+        VaultItemTypes.CreditCard => "card",
+        VaultItemTypes.CryptoWallet => "wallet",
+        VaultItemTypes.SecureNote => "note",
+        _ => "secret",
+    };
+
     private string NewItemUrl(string type) => $"/vault/{VaultId}/items/new/{type}";
 
     private string ItemUrl(Guid itemId) => $"/vault/{VaultId}/items/{itemId}";
 
-    private sealed record DecryptedSummary(string Title, string? Subtitle);
+    private sealed record DecryptedSummary(string Title, string? Subtitle, string? QuickUsername = null, string? QuickPassword = null);
 }
