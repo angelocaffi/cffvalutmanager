@@ -15,7 +15,7 @@ function loadSdk(clientId, currency) {
 
     sdkLoadPromise = new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency)}`;
+        script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency)}&disable-funding=card,credit,paylater,venmo`;
         script.onload = () => resolve();
         script.onerror = () => reject(new Error("Impossibile caricare l'SDK PayPal."));
         document.head.appendChild(script);
