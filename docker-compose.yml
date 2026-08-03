@@ -1,0 +1,61 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    ports:
+      # Exposed only so `dotnet ef database update` can run from the host to apply migrations
+      # (this project never auto-migrates on startup, see CLAUDE.md). Remove this mapping once
+      # the database is reachable another way, or firewall it off, in a real deployment.
+      # Host port deliberately not 1433: a machine with its own local SQL Server instance (common
+      # for .NET dev boxes) already owns that port, and Docker Desktop's port-forwarding silently
+      # loses the race to it — connections to localhost:1433 land on the wrong SQL Server.
+      - "15433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/CffVaultManager.Api/Dockerfile
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Server=sqlserver;Database=CffVaultManager;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
+      Cors__AllowedOrigins__0: ${WEB_PUBLIC_ORIGIN:?set WEB_PUBLIC_ORIGIN in .env}
+      WebAuthn__RelyingPartyId: ${WEBAUTHN_RELYING_PARTY_ID:?set WEBAUTHN_RELYING_PARTY_ID in .env}
+      WebAuthn__Origins__0: ${WEB_PUBLIC_ORIGIN:?set WEB_PUBLIC_ORIGIN in .env}
+      Email__SmtpHost: ${SMTP_HOST:-}
+      Email__SmtpPort: ${SMTP_PORT:-587}
+      Email__SmtpUsername: ${SMTP_USERNAME:-}
+      Email__SmtpPassword: ${SMTP_PASSWORD:-}
+      Email__UseStartTls: ${SMTP_USE_STARTTLS:-true}
+      Email__FromAddress: ${SMTP_FROM_ADDRESS:-}
+      Email__FromDisplayName: CffVault
+      PayPal__ClientId: ${PAYPAL_CLIENT_ID:-}
+      PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: .
+      dockerfile: src/CffVaultManager.Web/Dockerfile
+    depends_on:
+      - api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "8081:8080"
+
+volumes:
+  sqlserver-data:
