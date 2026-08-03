@@ -1,6 +1,14 @@
+networks:
+  appnet:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    networks:
+      - appnet
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
@@ -24,6 +32,8 @@ services:
     build:
       context: .
       dockerfile: src/CffVaultManager.Api/Dockerfile
+    networks:
+      - appnet
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -31,9 +41,13 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Default: Server=sqlserver;Database=CffVaultManager;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
-      Cors__AllowedOrigins__0: ${WEB_PUBLIC_ORIGIN:?set WEB_PUBLIC_ORIGIN in .env}
-      WebAuthn__RelyingPartyId: ${WEBAUTHN_RELYING_PARTY_ID:?set WEBAUTHN_RELYING_PARTY_ID in .env}
-      WebAuthn__Origins__0: ${WEB_PUBLIC_ORIGIN:?set WEB_PUBLIC_ORIGIN in .env}
+      Cors__AllowedOrigins__0: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      WebAuthn__RelyingPartyId: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      WebAuthn__Origins__0: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      # Caddy is the only reverse proxy in front of this container (see the `caddy` service below,
+      # static IP 172.28.0.10 on this same network) — trusting its forwarded headers is what makes
+      # rate-limiting/audit IP attribution see the real client IP instead of Caddy's, see Program.cs.
+      ReverseProxy__KnownProxies__0: 172.28.0.10
       Email__SmtpHost: ${SMTP_HOST:-}
       Email__SmtpPort: ${SMTP_PORT:-587}
       Email__SmtpUsername: ${SMTP_USERNAME:-}
@@ -44,18 +58,44 @@ services:
       PayPal__ClientId: ${PAYPAL_CLIENT_ID:-}
       PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
     ports:
+      # Not meant to be reached directly in production — only `caddy` (80/443) should be open on
+      # the host's external firewall. Left published for local testing without a domain/TLS.
       - "8080:8080"
 
   web:
     build:
       context: .
       dockerfile: src/CffVaultManager.Web/Dockerfile
+    networks:
+      - appnet
     depends_on:
       - api
     environment:
       ASPNETCORE_ENVIRONMENT: Production
     ports:
+      # Same caveat as api's 8080 above: local-testing convenience, not meant to be open externally.
       - "8081:8080"
+
+  caddy:
+    image: caddy:2-alpine
+    networks:
+      appnet:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      - api
+      - web
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
 
 volumes:
   sqlserver-data:
+  caddy-data:
+  caddy-config:
