@@ -12,7 +12,7 @@ COPY src/CffVaultManager.Crypto/ src/CffVaultManager.Crypto/
 COPY src/CffVaultManager.Web.Client/ src/CffVaultManager.Web.Client/
 COPY src/CffVaultManager.Web/ src/CffVaultManager.Web/
 
-RUN dotnet publish src/CffVaultManager.Web/CffVaultManager.Web.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/CffVaultManager.Web/CffVaultManager.Web.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
