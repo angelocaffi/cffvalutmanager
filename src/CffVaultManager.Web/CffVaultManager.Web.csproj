@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CffVaultManager.Web.Client\CffVaultManager.Web.Client.csproj" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.6" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.10" />
   </ItemGroup>
 
 </Project>
