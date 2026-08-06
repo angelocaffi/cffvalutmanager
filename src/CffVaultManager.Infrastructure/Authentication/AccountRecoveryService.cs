@@ -184,8 +184,7 @@ internal sealed class AccountRecoveryService : IAccountRecoveryService
         // (a 256-bit secret), so a dedicated lockout mechanism wouldn't close a real threat.
         bool valid = factor switch
         {
-            MfaFactor.Totp => user.MfaEnabled && user.MfaSecret is not null
-                && _totp.ValidateCode(_secretProtector.Unprotect(user.MfaSecret), code),
+            MfaFactor.Totp => ValidateTotp(user, code),
             MfaFactor.EmailOtp => await _emailOtpMfa.VerifyChallengeCodeAsync(user.Id, code, ip, userAgent, ct),
             _ => false,
         };
@@ -278,6 +277,25 @@ internal sealed class AccountRecoveryService : IAccountRecoveryService
         }
 
         return true;
+    }
+
+    // Duplicated from AuthenticationService deliberately (see the class doc comment on why the
+    // whole MFA dispatch is duplicated rather than shared).
+    private bool ValidateTotp(User user, string code)
+    {
+        if (!user.MfaEnabled || user.MfaSecret is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _totp.ValidateCode(_secretProtector.Unprotect(user.MfaSecret), code);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
     }
 
     private async Task<IReadOnlyList<MfaFactor>> AvailableFactorsAsync(User user, CancellationToken ct)

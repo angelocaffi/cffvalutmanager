@@ -8,6 +8,7 @@ using CffVaultManager.Infrastructure.Billing;
 using CffVaultManager.Infrastructure.Persistence;
 using CffVaultManager.Infrastructure.VaultCore;
 using Fido2NetLib;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,8 +29,20 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<ITenantAdministrationService, TenantAdministrationService>();
 
-        // Server-held key material for MFA-secret protection.
-        services.AddDataProtection();
+        // Server-held key material for MFA-secret protection. Without an explicit persistence
+        // path, ASP.NET Core falls back to the container's own writable filesystem
+        // (/root/.aspnet/DataProtection-Keys on Linux) — indistinguishable from "working" until
+        // the container is recreated (any image rebuild/redeploy), at which point every existing
+        // MfaSecret becomes permanently undecryptable (CryptographicException: key not found in
+        // the key ring) and TOTP-only accounts are locked out. DataProtection:KeyPath must point
+        // at a Docker volume (see docker-compose.yml) in any real deployment; left unconfigured
+        // for local dev/tests, where losing the key ring across restarts is harmless.
+        var dataProtection = services.AddDataProtection();
+        string? keyPath = configuration["DataProtection:KeyPath"];
+        if (!string.IsNullOrWhiteSpace(keyPath))
+        {
+            dataProtection.SetApplicationName("CffVaultManager").PersistKeysToFileSystem(new DirectoryInfo(keyPath));
+        }
 
         // Stateless crypto/token helpers: safe as singletons.
         services.AddSingleton<IKeyDerivationService, Argon2KeyDerivationService>();

@@ -60,6 +60,12 @@ services:
       PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
       Billing__VipEmail: ${BILLING_VIP_EMAIL:-}
       Billing__VipAnnualPrice: ${BILLING_VIP_ANNUAL_PRICE:-}
+      # Must survive container recreation (rebuild/redeploy) — otherwise every MfaSecret encrypted
+      # under the previous key ring becomes permanently undecryptable, locking out TOTP-only
+      # accounts. See the comment on AddDataProtection in ServiceCollectionExtensions.cs.
+      DataProtection__KeyPath: /keys
+    volumes:
+      - dataprotection-keys:/keys
     ports:
       # Not meant to be reached directly in production — only `caddy` (80/443) should be open on
       # the host's external firewall. Left published for local testing without a domain/TLS.
@@ -102,3 +108,4 @@ volumes:
   sqlserver-data:
   caddy-data:
   caddy-config:
+  dataprotection-keys:

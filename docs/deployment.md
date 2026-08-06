@@ -104,5 +104,12 @@ billing/checkout and fall back to `LoggingEmailSender`, respectively.
   database.
 - Caddy's own state (ACME account key + issued certificates) persists in the `caddy-data` named
   volume — losing it just means re-issuing a certificate on next start, not an outage.
+- The `api` container's Data Protection key ring persists in the `dataprotection-keys` named
+  volume (`DataProtection:KeyPath=/keys`) — unlike Caddy's, losing this one is **not** harmless:
+  every existing TOTP `MfaSecret` becomes permanently undecryptable, locking out any account whose
+  only MFA factor is TOTP (confirmed in production: a `docker compose up --build` recreated the
+  container without this volume, and the very next login attempt logged `CryptographicException:
+  The key {...} was not found in the key ring`). If it's ever lost, affected users need their TOTP
+  reset (no self-service "disable TOTP" exists yet — see `MfaSetupService`).
 - `PayPal:ClientId`/`ClientSecret` and `Email:SmtpHost` are optional — leaving them unset disables
   billing/checkout (503) and falls back to `LoggingEmailSender` respectively, same as local dev.

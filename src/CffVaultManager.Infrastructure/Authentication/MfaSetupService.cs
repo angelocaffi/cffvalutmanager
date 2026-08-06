@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
@@ -49,7 +50,19 @@ internal sealed class MfaSetupService : IMfaSetupService
             return false;
         }
 
-        byte[] secret = _secretProtector.Unprotect(user.MfaSecret);
+        byte[] secret;
+        try
+        {
+            secret = _secretProtector.Unprotect(user.MfaSecret);
+        }
+        catch (CryptographicException)
+        {
+            // The key ring that encrypted this secret is gone (see ServiceCollectionExtensions.cs
+            // DataProtection:KeyPath) — the pending setup is unrecoverable, same as a wrong code:
+            // the caller must call SetupTotpAsync again to get a fresh secret.
+            return false;
+        }
+
         if (!_totp.ValidateCode(secret, code))
         {
             return false;

@@ -205,8 +205,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         // code is brute-forceable without this.
         bool valid = factor switch
         {
-            MfaFactor.Totp => user.MfaEnabled && user.MfaSecret is not null
-                && _totp.ValidateCode(_secretProtector.Unprotect(user.MfaSecret), code),
+            MfaFactor.Totp => ValidateTotp(user, code),
             MfaFactor.EmailOtp => await _emailOtpMfa.VerifyChallengeCodeAsync(user.Id, code, ip, userAgent, ct),
             _ => false,
         };
@@ -376,6 +375,27 @@ internal sealed class AuthenticationService : IAuthenticationService
             user.KdfVersion);
 
         return LoginResult.Authenticated(access, refresh.PlainToken, materials);
+    }
+
+    private bool ValidateTotp(User user, string code)
+    {
+        if (!user.MfaEnabled || user.MfaSecret is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _totp.ValidateCode(_secretProtector.Unprotect(user.MfaSecret), code);
+        }
+        catch (CryptographicException)
+        {
+            // The Data Protection key ring that encrypted this secret is gone (e.g. lost across a
+            // redeploy before DataProtection:KeyPath was configured to persist it, see
+            // ServiceCollectionExtensions.cs) — treat exactly like a wrong code, never as an
+            // unhandled 500.
+            return false;
+        }
     }
 
     private static bool IsLockedOut(User user) => user.LockedUntil is not null && user.LockedUntil > DateTimeOffset.UtcNow;
