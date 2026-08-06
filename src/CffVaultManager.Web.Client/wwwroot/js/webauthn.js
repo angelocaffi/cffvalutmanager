@@ -28,7 +28,13 @@ function bufferToBase64Url(buffer) {
 }
 
 function decodeCredentialDescriptors(list) {
-    if (!list) {
+    // An empty array is treated the same as absent: some Android/Chrome combinations interpret an
+    // explicitly-empty allowCredentials as "no credential is allowed" (an outright rejection) —
+    // different from "no restriction", which is what an empty/omitted list is supposed to mean for
+    // a discoverable/usernameless request (see authenticateWithPrf below, the passwordless-login
+    // case this actually surfaced in: the platform still shows the biometric prompt, then the
+    // promise rejects once it tries to validate the chosen credential against the empty list).
+    if (!list || list.length === 0) {
         return undefined;
     }
     return list.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
