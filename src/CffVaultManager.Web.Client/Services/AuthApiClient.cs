@@ -225,25 +225,32 @@ public sealed class AuthApiClient
     public async Task DisableEmailOtpMfaAsync(CancellationToken ct = default) =>
         await _http.PostAsync("/api/auth/mfa/email-otp/disable", content: null, ct);
 
-    /// <summary>Starts a WebAuthn registration ceremony; returns the raw CredentialCreateOptions JSON to hand to the browser.</summary>
-    public async Task<string> BeginWebAuthnRegistrationAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Starts a WebAuthn registration ceremony; returns the raw CredentialCreateOptions JSON to
+    /// hand to the browser. <paramref name="enablePasswordless"/> requests a discoverable
+    /// credential with the PRF extension instead of a normal MFA-only one (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf).
+    /// </summary>
+    public async Task<string> BeginWebAuthnRegistrationAsync(bool enablePasswordless = false, CancellationToken ct = default)
     {
-        var response = await _http.PostAsync("/api/auth/webauthn/register/begin", content: null, ct);
+        string query = enablePasswordless ? "?enablePasswordless=true" : string.Empty;
+        var response = await _http.PostAsync($"/api/auth/webauthn/register/begin{query}", content: null, ct);
         return await response.Content.ReadAsStringAsync(ct);
     }
 
     /// <summary>
     /// Completes a WebAuthn registration with the browser's attestation response. Fails with a
     /// 400-derived message if the attestation itself doesn't verify (wrong origin, tampered
-    /// response, expired ceremony, etc.).
+    /// response, expired ceremony, etc.). <paramref name="prfWrappedDek"/> is set only when
+    /// enrolling for passwordless login — the caller's own DEK, already wrapped client-side with a
+    /// key derived from this ceremony's PRF output; opaque ciphertext to the server.
     /// </summary>
     public async Task<(bool Success, string? Error)> CompleteWebAuthnRegistrationAsync(
-        string attestationResponseJson, string? nickname, CancellationToken ct = default)
+        string attestationResponseJson, string? nickname, byte[]? prfWrappedDek = null, CancellationToken ct = default)
     {
         using var doc = JsonDocument.Parse(attestationResponseJson);
         var response = await _http.PostAsJsonAsync(
             "/api/auth/webauthn/register/complete",
-            new { AttestationResponse = doc.RootElement, Nickname = nickname },
+            new { AttestationResponse = doc.RootElement, Nickname = nickname, PrfWrappedDek = prfWrappedDek },
             ct);
 
         if (response.IsSuccessStatusCode)
@@ -278,6 +285,27 @@ public sealed class AuthApiClient
         var response = await _http.PostAsJsonAsync(
             "/api/auth/webauthn/assertion/complete",
             new { ChallengeToken = challengeToken, AssertionResponse = doc.RootElement },
+            ct);
+        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+    }
+
+    /// <summary>
+    /// Starts a passwordless, usernameless login — no email, no prior password step. Unlike
+    /// <see cref="BeginWebAuthnAssertionAsync"/>, there is no challenge token yet; the server hands
+    /// back a fresh ceremony id the client must re-present to <see cref="CompletePasskeyLoginAsync"/>.
+    /// </summary>
+    public async Task<PasskeyLoginBeginResponse> BeginPasskeyLoginAsync(CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync("/api/auth/webauthn/passkey-login/begin", content: null, ct);
+        return (await response.Content.ReadFromJsonAsync<PasskeyLoginBeginResponse>(JsonOptions, ct))!;
+    }
+
+    public async Task<LoginResponse> CompletePasskeyLoginAsync(Guid ceremonyId, string assertionResponseJson, CancellationToken ct = default)
+    {
+        using var doc = JsonDocument.Parse(assertionResponseJson);
+        var response = await _http.PostAsJsonAsync(
+            "/api/auth/webauthn/passkey-login/complete",
+            new { CeremonyId = ceremonyId, AssertionResponse = doc.RootElement },
             ct);
         return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
     }
@@ -389,7 +417,9 @@ public sealed class AuthApiClient
 public sealed record PreloginResponse(byte[] MasterPasswordSalt, int KdfMemoryKb, int KdfIterations, int KdfVersion);
 
 public sealed record CryptoMaterialsResponse(
-    byte[] EncryptedDek, byte[]? MasterPasswordSalt, int? KdfMemoryKb, int? KdfIterations, int? KdfVersion);
+    byte[] EncryptedDek, byte[]? MasterPasswordSalt, int? KdfMemoryKb, int? KdfIterations, int? KdfVersion, byte[]? PrfWrappedDek = null);
+
+public sealed record PasskeyLoginBeginResponse(Guid CeremonyId, string OptionsJson);
 
 public sealed record LoginResponse(
     bool Success,
@@ -399,7 +429,8 @@ public sealed record LoginResponse(
     string? RefreshToken,
     string? MfaChallengeToken,
     IReadOnlyList<string>? AvailableMfaFactors,
-    CryptoMaterialsResponse? CryptoMaterials);
+    CryptoMaterialsResponse? CryptoMaterials,
+    string? Email = null);
 
 public sealed record UserProfileResponse(
     string Email,

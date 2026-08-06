@@ -18,7 +18,7 @@ public class WebAuthnCeremony
 
     public WebAuthnCeremony(
         Guid id,
-        Guid userId,
+        Guid? userId,
         WebAuthnCeremonyPurpose purpose,
         string optionsJson,
         DateTimeOffset expiresAt,
@@ -41,7 +41,8 @@ public class WebAuthnCeremony
 
     public Guid Id { get; private set; }
 
-    public Guid UserId { get; private set; }
+    /// <summary>Null only for <see cref="WebAuthnCeremonyPurpose.PasskeyLogin"/>'s "begin" step — the user isn't known yet, discovered later from the assertion's credential id.</summary>
+    public Guid? UserId { get; private set; }
 
     public User? User { get; set; }
 

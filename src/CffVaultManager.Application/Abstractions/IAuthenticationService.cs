@@ -61,4 +61,19 @@ public interface IAuthenticationService
     /// generic failure when the refresh token is unknown, already rotated/revoked, or expired.
     /// </summary>
     Task<LoginResult> RefreshAsync(string refreshToken, string? ip, string? userAgent, CancellationToken ct = default);
+
+    /// <summary>
+    /// Starts a passwordless, usernameless login (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf)
+    /// — no email, no prior password step. Unlike <see cref="RequestWebAuthnAssertionOptionsAsync"/>,
+    /// there is no challenge token from an earlier step; the caller only has a fresh ceremony id.
+    /// </summary>
+    Task<PasskeyLoginCeremony> BeginPasskeyLoginAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Completes a passwordless login: verifies the assertion, discovers the user from the
+    /// credential, and on success returns the full session — <see cref="LoginResult.CryptoMaterials"/>
+    /// carries <c>PrfWrappedDek</c> instead of relying on the caller already knowing
+    /// <c>EncryptedDek</c>, since no master-password-derived KEK exists in this flow at all.
+    /// </summary>
+    Task<LoginResult> CompletePasskeyLoginAsync(Guid ceremonyId, string assertionResponseJson, string? ip, string? userAgent, CancellationToken ct = default);
 }

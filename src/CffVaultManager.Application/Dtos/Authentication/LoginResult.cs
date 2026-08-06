@@ -40,12 +40,21 @@ public sealed record LoginResult
     /// <summary>Zero-knowledge material for the client, present only on a fully authenticated result.</summary>
     public CryptoMaterials? CryptoMaterials { get; private init; }
 
-    public static LoginResult Authenticated(string accessToken, string refreshToken, CryptoMaterials materials) => new()
+    /// <summary>
+    /// The account's own email, present only on a fully authenticated result. Every login path
+    /// already has it server-side; the client only strictly needs it for passwordless passkey
+    /// login, which never had the user type one (every other flow already knows it locally, from
+    /// the form the user filled in).
+    /// </summary>
+    public string? Email { get; private init; }
+
+    public static LoginResult Authenticated(string accessToken, string refreshToken, CryptoMaterials materials, string? email = null) => new()
     {
         Success = true,
         AccessToken = accessToken,
         RefreshToken = refreshToken,
         CryptoMaterials = materials,
+        Email = email,
     };
 
     public static LoginResult MfaRequired(string challengeToken, IReadOnlyList<MfaFactor> availableFactors) => new()

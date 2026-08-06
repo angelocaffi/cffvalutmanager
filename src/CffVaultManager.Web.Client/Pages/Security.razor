@@ -7,6 +7,7 @@
 @inject AuthApiClient AuthApi
 @inject WebAuthnJsInterop WebAuthn
 @inject IDekService DekService
+@inject IPasskeyDekWrapKeyService PasskeyDekWrapKey
 @inject IRecoveryKeyService RecoveryKeyService
 @inject SessionState Session
 @inject ClipboardJsInterop Clipboard
@@ -156,6 +157,11 @@ else
                 <div class="alert alert-danger py-2" role="alert">@_webAuthnError</div>
             }
 
+            @if (_webAuthnInfo is not null)
+            {
+                <div class="alert alert-warning py-2" role="alert">@_webAuthnInfo</div>
+            }
+
             @if (_credentials is null)
             {
                 <div class="d-flex align-items-center gap-2 text-body-secondary mb-3">
@@ -183,7 +189,7 @@ else
                 </ul>
             }
 
-            <div class="input-group" style="max-width: 32rem;">
+            <div class="input-group mb-2" style="max-width: 32rem;">
                 <input type="text" class="form-control" placeholder="Nome dispositivo (opzionale)"
                        @bind="_newCredentialNickname" @bind:event="oninput" disabled="@_webAuthnBusy" />
                 <button type="button" class="btn btn-info" disabled="@(_webAuthnBusy || !_webAuthnAvailable)" @onclick="RegisterCredentialAsync">
@@ -194,6 +200,22 @@ else
                     Registra dispositivo
                 </button>
             </div>
+
+            <p class="text-body-secondary small mb-2">
+                In alternativa, attiva l'accesso <strong>senza digitare la master password</strong> su
+                questo dispositivo: al prossimo accesso basterà il sensore biometrico. Richiede una
+                nuova registrazione dedicata (le passkey registrate sopra come fattore di sicurezza
+                non diventano automaticamente utilizzabili per questo) e non è supportato da ogni
+                browser/dispositivo — in quel caso il dispositivo viene comunque registrato come
+                normale fattore di sicurezza.
+            </p>
+            <button type="button" class="btn btn-outline-info" disabled="@(_webAuthnBusy || !_webAuthnAvailable)" @onclick="RegisterPasswordlessCredentialAsync">
+                @if (_webAuthnBusy)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                }
+                Attiva accesso senza password su questo dispositivo
+            </button>
         </div>
     </div>
 
@@ -281,6 +303,7 @@ else
     private bool _webAuthnAvailable;
     private bool _webAuthnBusy;
     private string? _webAuthnError;
+    private string? _webAuthnInfo;
     private string _newCredentialNickname = string.Empty;
 
     protected override async Task OnInitializedAsync()
@@ -295,6 +318,7 @@ else
     private async Task RegisterCredentialAsync()
     {
         _webAuthnError = null;
+        _webAuthnInfo = null;
         _webAuthnBusy = true;
         try
         {
@@ -308,6 +332,62 @@ else
 
             string? nickname = string.IsNullOrWhiteSpace(_newCredentialNickname) ? null : _newCredentialNickname;
             var (success, error) = await AuthApi.CompleteWebAuthnRegistrationAsync(attestationResponseJson, nickname);
+            if (!success)
+            {
+                _webAuthnError = error;
+                return;
+            }
+
+            _newCredentialNickname = string.Empty;
+            await ReloadCredentialsAsync();
+        }
+        finally
+        {
+            _webAuthnBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Registers a new, discoverable passkey with the WebAuthn PRF extension and wraps the
+    /// caller's own already-unlocked DEK with a key derived from it — see
+    /// docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf. The PRF output
+    /// never leaves this method; only the resulting ciphertext is sent to the server.
+    /// </summary>
+    private async Task RegisterPasswordlessCredentialAsync()
+    {
+        _webAuthnError = null;
+        _webAuthnInfo = null;
+        _webAuthnBusy = true;
+        try
+        {
+            string optionsJson = await AuthApi.BeginWebAuthnRegistrationAsync(enablePasswordless: true);
+            var (responseJson, prfOutput) = await WebAuthn.RegisterWithPrfAsync(optionsJson);
+            if (responseJson is null)
+            {
+                _webAuthnError = "Registrazione annullata o non riuscita.";
+                return;
+            }
+
+            byte[]? prfWrappedDek = null;
+            if (prfOutput is null)
+            {
+                _webAuthnInfo = "Questo dispositivo/browser non supporta l'accesso senza password: il dispositivo verrà comunque registrato come normale fattore di sicurezza.";
+            }
+            else
+            {
+                byte[] prfKek = PasskeyDekWrapKey.DeriveKey(prfOutput);
+                try
+                {
+                    prfWrappedDek = DekService.EncryptDek(Session.RequireDek(), prfKek).ToBytes();
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(prfKek);
+                }
+            }
+
+            string? nickname = string.IsNullOrWhiteSpace(_newCredentialNickname) ? null : _newCredentialNickname;
+            var (success, error) = await AuthApi.CompleteWebAuthnRegistrationAsync(responseJson, nickname, prfWrappedDek);
             if (!success)
             {
                 _webAuthnError = error;

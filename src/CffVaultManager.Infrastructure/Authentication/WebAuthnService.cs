@@ -21,6 +21,14 @@ internal sealed class WebAuthnService : IWebAuthnService
 {
     private static readonly TimeSpan CeremonyLifetime = TimeSpan.FromMinutes(5);
 
+    // Fixed, non-secret domain-separation salt for the WebAuthn PRF extension — set once here,
+    // server-side, in both the passwordless-enrollment registration and every usernameless login
+    // assertion, so the same credential always yields the same PRF output for the same salt (see
+    // docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf). Fido2NetLib
+    // base64url-encodes it into the options JSON like challenge/user.id; webauthn.js decodes it
+    // with the same helper it already uses for those — no client-side constant needed.
+    private static readonly byte[] PasskeyPrfSalt = "CffVaultManager:PasskeyDekWrap:v1"u8.ToArray();
+
     private readonly CffVaultManagerDbContext _db;
     private readonly IFido2 _fido2;
     private readonly ISecurityNotificationService? _securityNotifications;
@@ -32,7 +40,7 @@ internal sealed class WebAuthnService : IWebAuthnService
         _securityNotifications = securityNotifications;
     }
 
-    public async Task<string> BeginRegistrationAsync(Guid userId, CancellationToken ct = default)
+    public async Task<string> BeginRegistrationAsync(Guid userId, bool enablePasswordless = false, CancellationToken ct = default)
     {
         // Runs post-authentication, so the tenant query filter is resolved and correctly scopes
         // this to the caller's own user record (mirrors MfaSetupService/EmailOtpMfaService).
@@ -55,11 +63,22 @@ internal sealed class WebAuthnService : IWebAuthnService
             ExcludeCredentials = excludeCredentials,
             AuthenticatorSelection = new AuthenticatorSelection
             {
-                ResidentKey = ResidentKeyRequirement.Discouraged,
+                // Discoverable (resident) only for the passwordless-enrollment path — a normal
+                // MFA-only credential stays non-discoverable, unchanged from before this feature.
+                ResidentKey = enablePasswordless ? ResidentKeyRequirement.Required : ResidentKeyRequirement.Discouraged,
                 UserVerification = UserVerificationRequirement.Preferred,
             },
             AttestationPreference = AttestationConveyancePreference.None,
             PubKeyCredParams = PubKeyCredParam.Defaults,
+            Extensions = enablePasswordless
+                ? new AuthenticationExtensionsClientInputs
+                {
+                    PRF = new AuthenticationExtensionsPRFInputs
+                    {
+                        Eval = new AuthenticationExtensionsPRFValues { First = PasskeyPrfSalt },
+                    },
+                }
+                : null,
         });
 
         string optionsJson = options.ToJson();
@@ -67,7 +86,7 @@ internal sealed class WebAuthnService : IWebAuthnService
         return optionsJson;
     }
 
-    public async Task<Guid> CompleteRegistrationAsync(Guid userId, string attestationResponseJson, string? nickname, CancellationToken ct = default)
+    public async Task<Guid> CompleteRegistrationAsync(Guid userId, string attestationResponseJson, string? nickname, byte[]? prfWrappedDek = null, CancellationToken ct = default)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
             ?? throw new InvalidOperationException("User not found.");
@@ -122,10 +141,16 @@ internal sealed class WebAuthnService : IWebAuthnService
             nickname,
             transports: result.Transports is { Length: > 0 }
                 ? string.Join(",", result.Transports)
-                : null);
+                : null,
+            prfWrappedDek: prfWrappedDek);
 
         _db.WebAuthnCredentials.Add(credential);
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, userId, AuditAction.WebAuthnCredentialRegistered));
+        if (prfWrappedDek is not null)
+        {
+            _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, userId, AuditAction.PasskeyLoginEnabled));
+        }
+
         await _db.SaveChangesAsync(ct);
 
         return credential.Id;
@@ -255,6 +280,99 @@ internal sealed class WebAuthnService : IWebAuthnService
         credential.LastUsedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<PasskeyLoginCeremony> BeginPasskeyLoginAsync(CancellationToken ct = default)
+    {
+        var options = _fido2.GetAssertionOptions(new GetAssertionOptionsParams
+        {
+            // AllowedCredentials deliberately left unset: a usernameless assertion has no known
+            // user to scope it to — the browser resolves candidates itself from any discoverable
+            // credential it holds for this origin.
+            UserVerification = UserVerificationRequirement.Preferred,
+            Extensions = new AuthenticationExtensionsClientInputs
+            {
+                PRF = new AuthenticationExtensionsPRFInputs
+                {
+                    Eval = new AuthenticationExtensionsPRFValues { First = PasskeyPrfSalt },
+                },
+            },
+        });
+
+        string optionsJson = options.ToJson();
+
+        // No userId to key this ceremony by (unlike ReplacePendingCeremonyAsync's callers) — the
+        // ceremony's own id is the only correlator, returned to the client and re-presented at
+        // "complete", same principle as TenantProvisioningRequest's Id-as-token.
+        var ceremonyId = Guid.NewGuid();
+        _db.WebAuthnCeremonies.Add(new WebAuthnCeremony(
+            ceremonyId, userId: null, WebAuthnCeremonyPurpose.PasskeyLogin, optionsJson, DateTimeOffset.UtcNow.Add(CeremonyLifetime)));
+        await _db.SaveChangesAsync(ct);
+
+        return new PasskeyLoginCeremony(ceremonyId, optionsJson);
+    }
+
+    public async Task<PasskeyLoginAssertionResult?> CompletePasskeyLoginAssertionAsync(Guid ceremonyId, string assertionResponseJson, CancellationToken ct = default)
+    {
+        var ceremony = await _db.WebAuthnCeremonies.FirstOrDefaultAsync(
+            c => c.Id == ceremonyId && c.Purpose == WebAuthnCeremonyPurpose.PasskeyLogin && c.ConsumedAt == null, ct);
+        if (ceremony is null || ceremony.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            return null;
+        }
+
+        AuthenticatorAssertionRawResponse? assertionResponse;
+        try
+        {
+            assertionResponse = JsonSerializer.Deserialize<AuthenticatorAssertionRawResponse>(assertionResponseJson);
+        }
+        catch (JsonException)
+        {
+            assertionResponse = null;
+        }
+
+        if (assertionResponse is null)
+        {
+            return null;
+        }
+
+        // No known user yet — the credential's own (globally unique) id is the only way to
+        // discover who's logging in for a usernameless assertion, unlike CompleteAssertionAsync
+        // above which already knows userId from the MFA challenge token.
+        var credential = await _db.WebAuthnCredentials.FirstOrDefaultAsync(c => c.CredentialId == assertionResponse.RawId, ct);
+        if (credential is null || credential.PrfWrappedDek is null)
+        {
+            return null;
+        }
+
+        VerifyAssertionResult result;
+        try
+        {
+            result = await _fido2.MakeAssertionAsync(
+                new MakeAssertionParams
+                {
+                    AssertionResponse = assertionResponse,
+                    OriginalOptions = AssertionOptions.FromJson(ceremony.OptionsJson),
+                    StoredPublicKey = credential.PublicKey,
+                    StoredSignatureCounter = credential.SignCount,
+                    IsUserHandleOwnerOfCredentialIdCallback = (p, _) =>
+                        Task.FromResult(p.UserHandle.AsSpan().SequenceEqual(credential.UserId.ToByteArray())),
+                },
+                ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ceremony.ConsumedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return null;
+        }
+
+        ceremony.ConsumedAt = DateTimeOffset.UtcNow;
+        credential.SignCount = result.SignCount;
+        credential.LastUsedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return new PasskeyLoginAssertionResult(credential.UserId, credential.PrfWrappedDek);
     }
 
     private async Task<WebAuthnCeremony?> GetPendingCeremonyAsync(Guid userId, WebAuthnCeremonyPurpose purpose, CancellationToken ct)

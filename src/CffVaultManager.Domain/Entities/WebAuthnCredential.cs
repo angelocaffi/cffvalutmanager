@@ -26,7 +26,8 @@ public class WebAuthnCredential
         Guid aaGuid,
         string? nickname = null,
         string? transports = null,
-        DateTimeOffset? createdAt = null)
+        DateTimeOffset? createdAt = null,
+        byte[]? prfWrappedDek = null)
     {
         Id = Guard.AgainstEmptyGuid(id);
         UserId = Guard.AgainstEmptyGuid(userId);
@@ -37,6 +38,7 @@ public class WebAuthnCredential
         Nickname = nickname;
         Transports = transports;
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow;
+        PrfWrappedDek = prfWrappedDek;
     }
 
     public Guid Id { get; private set; }
@@ -69,4 +71,13 @@ public class WebAuthnCredential
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>
+    /// The DEK, wrapped with a key derived client-side from this credential's WebAuthn PRF output
+    /// (see docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf) — null unless
+    /// this specific credential was registered as discoverable with passwordless enabled. Never
+    /// decrypted server-side; cleared (not re-wrapped) by DekRotationService, since the PRF output
+    /// isn't re-derivable without a fresh ceremony on this exact device.
+    /// </summary>
+    public byte[]? PrfWrappedDek { get; set; }
 }

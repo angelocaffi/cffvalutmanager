@@ -19,6 +19,17 @@ internal static class Guard
         return value;
     }
 
+    /// <summary>Same as <see cref="AgainstEmptyGuid(Guid, string?)"/>, but a null value passes through unchanged (a WebAuthn ceremony with no identified user yet — see <c>WebAuthnCeremonyPurpose.PasskeyLogin</c>).</summary>
+    public static Guid? AgainstEmptyGuid(Guid? value, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        if (value is { } notNull)
+        {
+            AgainstEmptyGuid(notNull, paramName);
+        }
+
+        return value;
+    }
+
     public static string AgainstNullOrWhiteSpace(string? value, [CallerArgumentExpression(nameof(value))] string? paramName = null)
     {
         if (string.IsNullOrWhiteSpace(value))

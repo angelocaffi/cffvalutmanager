@@ -7,4 +7,5 @@ public enum NotificationType
     MfaFactorDisabled,
     AccountRecovered,
     RecoveryKitInvalidated,
+    PasskeyLoginInvalidated,
 }

@@ -88,6 +88,80 @@ public sealed class WebAuthnEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PasskeyLogin_beginThenComplete_forAPasswordlessEnrolledCredential_returnsTokensAndThePrfWrappedDek()
+    {
+        var authHash = RandomBytes(32);
+        await ProvisionTenantAsync("admin@acme.test", authHash);
+        string accessToken = await LoginAsync("admin@acme.test", authHash);
+        var authenticator = new FakeWebAuthnAuthenticator();
+        byte[] prfOutput = RandomBytes(32);
+        byte[] prfWrappedDek = RandomBytes(48);
+
+        var beginResponse = await SendAuthorizedAsync(HttpMethod.Post, "/api/auth/webauthn/register/begin?enablePasswordless=true", accessToken, body: null);
+        Assert.Equal(HttpStatusCode.OK, beginResponse.StatusCode);
+        var createOptions = CredentialCreateOptions.FromJson(await beginResponse.Content.ReadAsStringAsync());
+
+        string attestationResponseJson = authenticator.CreateAttestationResponseJson(createOptions, ApiTestFactory.WebAuthnOrigin, prfOutput);
+        using var completeRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/webauthn/register/complete")
+        {
+            Content = JsonContent.Create(new
+            {
+                AttestationResponse = JsonDocument.Parse(attestationResponseJson).RootElement,
+                Nickname = (string?)null,
+                PrfWrappedDek = prfWrappedDek,
+            }),
+        };
+        completeRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var completeResponse = await _client.SendAsync(completeRequest);
+        Assert.Equal(HttpStatusCode.Created, completeResponse.StatusCode);
+
+        var beginLoginResponse = await _client.PostAsync("/api/auth/webauthn/passkey-login/begin", content: null);
+        Assert.Equal(HttpStatusCode.OK, beginLoginResponse.StatusCode);
+        using var beginLoginBody = JsonDocument.Parse(await beginLoginResponse.Content.ReadAsStringAsync());
+        Guid ceremonyId = beginLoginBody.RootElement.GetProperty("ceremonyId").GetGuid();
+        var assertionOptions = AssertionOptions.FromJson(beginLoginBody.RootElement.GetProperty("optionsJson").GetString()!);
+
+        authenticator.SignCount++;
+        string assertionResponseJson = authenticator.CreateAssertionResponseJson(
+            assertionOptions, ApiTestFactory.WebAuthnOrigin, GetUserId(accessToken), prfOutput: prfOutput);
+
+        var completeLoginResponse = await _client.PostAsJsonAsync("/api/auth/webauthn/passkey-login/complete", new
+        {
+            CeremonyId = ceremonyId,
+            AssertionResponse = JsonDocument.Parse(assertionResponseJson).RootElement,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, completeLoginResponse.StatusCode);
+        using var loginBody = JsonDocument.Parse(await completeLoginResponse.Content.ReadAsStringAsync());
+        Assert.True(loginBody.RootElement.GetProperty("success").GetBoolean());
+        Assert.NotNull(loginBody.RootElement.GetProperty("accessToken").GetString());
+        Assert.Equal("admin@acme.test", loginBody.RootElement.GetProperty("email").GetString());
+        byte[] returnedPrfWrappedDek = loginBody.RootElement.GetProperty("cryptoMaterials").GetProperty("prfWrappedDek").GetBytesFromBase64();
+        Assert.Equal(prfWrappedDek, returnedPrfWrappedDek);
+    }
+
+    [Fact]
+    public async Task PasskeyLogin_complete_withAnUnknownCredential_returns401()
+    {
+        var unregistered = new FakeWebAuthnAuthenticator();
+
+        var beginLoginResponse = await _client.PostAsync("/api/auth/webauthn/passkey-login/begin", content: null);
+        using var beginLoginBody = JsonDocument.Parse(await beginLoginResponse.Content.ReadAsStringAsync());
+        Guid ceremonyId = beginLoginBody.RootElement.GetProperty("ceremonyId").GetGuid();
+        var assertionOptions = AssertionOptions.FromJson(beginLoginBody.RootElement.GetProperty("optionsJson").GetString()!);
+
+        string assertionResponseJson = unregistered.CreateAssertionResponseJson(assertionOptions, ApiTestFactory.WebAuthnOrigin, Guid.NewGuid().ToByteArray());
+
+        var completeLoginResponse = await _client.PostAsJsonAsync("/api/auth/webauthn/passkey-login/complete", new
+        {
+            CeremonyId = ceremonyId,
+            AssertionResponse = JsonDocument.Parse(assertionResponseJson).RootElement,
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, completeLoginResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task Remove_credential_removes_the_factor_and_login_no_longer_requires_a_challenge()
     {
         var authHash = RandomBytes(32);

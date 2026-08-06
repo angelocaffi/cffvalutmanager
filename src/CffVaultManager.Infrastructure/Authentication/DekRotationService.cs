@@ -92,12 +92,35 @@ internal sealed class DekRotationService : IDekRotationService
             _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.RecoveryKitInvalidated));
         }
 
+        // Same reasoning as the recovery kit above: a passkey's wrapped DEK copy (see
+        // WebAuthnCredential.PrfWrappedDek) is tied to the DEK that just got replaced, and the PRF
+        // output that produced it isn't re-derivable server-side — only a fresh ceremony on that
+        // exact device could re-wrap it, which can't happen here. Clear every copy, not just one.
+        var passwordlessCredentials = await _db.WebAuthnCredentials
+            .Where(c => c.UserId == userId && c.PrfWrappedDek != null)
+            .ToListAsync(ct);
+        bool hadPasswordlessCredentials = passwordlessCredentials.Count > 0;
+        foreach (var credential in passwordlessCredentials)
+        {
+            credential.PrfWrappedDek = null;
+        }
+
+        if (hadPasswordlessCredentials)
+        {
+            _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.PasskeyLoginInvalidatedByRotation));
+        }
+
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
         if (kitExisted && _securityNotifications is not null)
         {
             await _securityNotifications.NotifyRecoveryKitInvalidatedAsync(user.Id, ct);
+        }
+
+        if (hadPasswordlessCredentials && _securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyPasskeyLoginInvalidatedAsync(user.Id, ct);
         }
     }
 }

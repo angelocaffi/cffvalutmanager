@@ -78,6 +78,38 @@ A differenza del login, il server non ha per costruzione modo di verificare che 
 
 Chi entra in possesso della Recovery Key **e** conosce l'email dell'account può decifrare l'intero vault bypassando del tutto la master password (mitigato solo dall'MFA, se attivo). Questo è intrinseco a qualunque meccanismo di recovery key (stesso tradeoff di 1Password Secret Key, Bitwarden Emergency Access): la sicurezza si sposta sul fatto che l'utente la conservi offline, fuori dalla superficie di attacco digitale — coerente con la scelta già fatta per l'accesso fisico al client ("fuori scope primario" nel modello di minaccia sopra). Va comunicato chiaramente nella UI al momento della generazione, non solo qui.
 
+## Sblocco senza password via Passkey (WebAuthn PRF)
+
+Meccanismo **opzionale, opt-in per dispositivo** da `/security` (vedi [features/authentication.md](features/authentication.md#login-passwordless-via-passkey-webauthn-prf)): permette un login "usernameless" su un dispositivo con biometria/passkey, senza digitare la master password. Non sostituisce la master password (resta l'unico modo per stabilire/recuperare la DEK da zero) — è una scorciatoia aggiuntiva e revocabile per singolo dispositivo, analoga nello spirito al Recovery Kit sopra ma con una fonte di chiave diversa.
+
+### Meccanismo
+
+L'estensione **PRF** di WebAuthn (Level 3) permette all'authenticator di produrre, dato un salt scelto dal Relying Party, un output pseudo-casuale a 32 byte **stabile per quella coppia credenziale+salt** (stesso input → stesso output, ad ogni cerimonia). Questo output — mai visto dal server — viene trattato come equivalente della master password:
+
+```
+PRF output (dall'authenticator, mai lascia il client)
+      │  HMAC-SHA256(prfOutput, "CffVaultManager:PasskeyDekWrap:v1")
+      ▼
+PRF-KEK                        — derivata, mai persistita, mai inviata al server
+      │  cifra (AES-256-GCM, stesso EncryptedBlob di EncryptedDek)
+      ▼
+DEK (la stessa DEK già in uso) — persistita SOLO cifrata con la PRF-KEK, su WebAuthnCredential.PrfWrappedDek
+```
+
+`HMAC-SHA256` è la primitiva scelta deliberatamente, non HKDF: è l'unica funzione di questo tipo già in uso client-side in questo progetto sotto Blazor WASM (`AuthHashService.DeriveAuthHash`), quindi non introduce un nuovo rischio di compatibilità WASM da verificare da zero (vedi la nota su `AesGcmCipherService`/BouncyCastle più sotto per lo stesso genere di vincolo). Il salt PRF stesso non è un segreto (è solo domain separation) e viene fissato una sola volta lato server dentro le opzioni WebAuthn.
+
+### Perché non rompe lo zero-knowledge
+
+Il server, sia in fase di registrazione sia di login, **verifica solo una assertion/attestation WebAuthn standard** (possesso dell'authenticator, nessun materiale crittografico coinvolto) e **restituisce solo ciphertext** (`PrfWrappedDek`) — esattamente lo stesso ruolo che oggi ha `EncryptedDek` rispetto alla master password. Il PRF output non deve **mai** raggiungere il server in nessuna forma: va estratto e tenuto strettamente client-side, separato dal resto della risposta WebAuthn che invece va verificata server-side (vedi [features/authentication.md](features/authentication.md#login-passwordless-via-passkey-webauthn-prf) per il dettaglio implementativo di dove questo taglio avviene nel codice JS).
+
+### Multi-dispositivo e invalidazione
+
+Ogni passkey/dispositivo ha il proprio secret d'authenticator, quindi il proprio PRF output e la propria copia di `WebAuthnCredential.PrfWrappedDek` — rimuovere un dispositivo invalida solo quella copia, mai le altre. La **rotazione della DEK** (`DekRotationService`) invalida (azzera) tutte le copie `PrfWrappedDek` di un utente, stesso trattamento già riservato al Recovery Kit sopra e per lo stesso motivo: il PRF output non è ri-derivabile lato server, quindi non c'è modo di ri-wrappare la nuova DEK senza una cerimonia interattiva reale su ciascun dispositivo — l'utente riattiva il passwordless dal dispositivo quando vuole, dopo una rotazione.
+
+### Supporto browser/authenticator non universale
+
+L'estensione PRF non è disponibile ovunque (buon supporto su Chrome/Android con Google Password Manager al momento della scrittura; supporto variabile altrove). La UI deve degradare in modo pulito al form email/master password quando non disponibile — mai un errore bloccante.
+
 ## Logging e osservabilità
 
 - **Divieto assoluto**: loggare password, numeri di carta, CVV, contenuto di secrets o master password, in qualunque forma (anche mascherata parzialmente, salvo ultime 4 cifre carte dove esplicitamente richiesto dalla UX).

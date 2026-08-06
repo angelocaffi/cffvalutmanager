@@ -392,6 +392,59 @@ public sealed class AccountRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task DekRotation_clearsPrfWrappedDekOnEveryCredential_andWritesAuditAndNotification()
+    {
+        var (tenantId, userId) = await ProvisionAsync();
+
+        Guid passwordlessCredentialId = Guid.NewGuid();
+        Guid mfaOnlyCredentialId = Guid.NewGuid();
+        using (var ctx = CreateContext(Tenant(tenantId, userId)))
+        {
+            // One passwordless-enabled credential (has PrfWrappedDek) and one plain MFA-only
+            // credential (doesn't) — only the former should be touched by rotation.
+            ctx.WebAuthnCredentials.Add(new WebAuthnCredential(
+                passwordlessCredentialId, userId, RandomBytes(32), RandomBytes(64), signCount: 1, aaGuid: Guid.NewGuid(),
+                prfWrappedDek: RandomBytes(48)));
+            ctx.WebAuthnCredentials.Add(new WebAuthnCredential(
+                mfaOnlyCredentialId, userId, RandomBytes(32), RandomBytes(64), signCount: 1, aaGuid: Guid.NewGuid()));
+            await ctx.SaveChangesAsync();
+        }
+
+        var notifications = new RecordingSecurityNotificationService();
+        using (var ctx = CreateContext(Tenant(tenantId, userId)))
+        {
+            await new DekRotationService(ctx, notifications).RotateDekAsync(userId, new RotateDekRequest(RandomBytes(48), []));
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        var passwordlessCredential = await verify.WebAuthnCredentials.IgnoreQueryFilters().SingleAsync(c => c.Id == passwordlessCredentialId);
+        var mfaOnlyCredential = await verify.WebAuthnCredentials.IgnoreQueryFilters().SingleAsync(c => c.Id == mfaOnlyCredentialId);
+        Assert.Null(passwordlessCredential.PrfWrappedDek);
+        Assert.Null(mfaOnlyCredential.PrfWrappedDek); // was already null; rotation must not fail touching it
+
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == userId && a.Action == AuditAction.PasskeyLoginInvalidatedByRotation));
+        Assert.True(notifications.PasskeyLoginInvalidatedCalled);
+    }
+
+    [Fact]
+    public async Task DekRotation_withNoPasswordlessCredentials_doesNotWritePasskeyLoginInvalidatedAuditOrNotify()
+    {
+        var (tenantId, userId) = await ProvisionAsync();
+
+        var notifications = new RecordingSecurityNotificationService();
+        using (var ctx = CreateContext(Tenant(tenantId, userId)))
+        {
+            await new DekRotationService(ctx, notifications).RotateDekAsync(userId, new RotateDekRequest(RandomBytes(48), []));
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.False(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.UserId == userId && a.Action == AuditAction.PasskeyLoginInvalidatedByRotation));
+        Assert.False(notifications.PasskeyLoginInvalidatedCalled);
+    }
+
+    [Fact]
     public async Task ChangeMasterPassword_does_not_touch_recovery_fields()
     {
         var (tenantId, userId) = await ProvisionAsync();
@@ -478,6 +531,14 @@ public sealed class AccountRecoveryTests : IDisposable
         public Task NotifyRecoveryKitInvalidatedAsync(Guid userId, CancellationToken ct = default)
         {
             RecoveryKitInvalidatedCalled = true;
+            return Task.CompletedTask;
+        }
+
+        public bool PasskeyLoginInvalidatedCalled { get; private set; }
+
+        public Task NotifyPasskeyLoginInvalidatedAsync(Guid userId, CancellationToken ct = default)
+        {
+            PasskeyLoginInvalidatedCalled = true;
             return Task.CompletedTask;
         }
     }

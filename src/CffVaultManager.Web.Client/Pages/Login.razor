@@ -10,6 +10,7 @@
 @inject SessionState Session
 @inject NavigationManager Navigation
 @inject WebAuthnJsInterop WebAuthn
+@inject IPasskeyDekWrapKeyService PasskeyDekWrapKey
 
 <PageTitle>Accedi</PageTitle>
 
@@ -30,6 +31,18 @@
 
             @if (_stage == Stage.Credentials)
             {
+                @if (_passkeyAvailable)
+                {
+                    <button type="button" class="btn btn-outline-info w-100 mb-3" disabled="@_passkeyBusy" @onclick="StartPasskeyLoginAsync">
+                        @if (_passkeyBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Accedi con passkey
+                    </button>
+                    <div class="text-center small text-body-secondary mb-3">oppure</div>
+                }
+
                 <form @onsubmit="HandleCredentialsSubmitAsync" @onsubmit:preventDefault="true">
                     <div class="mb-3">
                         <label for="login-email" class="form-label">Email</label>
@@ -201,6 +214,9 @@
     private string? _selectedFactor;
     private int _resendCooldownSeconds;
 
+    private bool _passkeyAvailable;
+    private bool _passkeyBusy;
+
     // Null until the first send actually completes — distinct from 0 (which means "sent, then
     // expired"), so the UI can show "sending…" instead of wrongly claiming an expired code that
     // was never sent in the first place.
@@ -219,7 +235,11 @@
     [SupplyParameterFromQuery(Name = "returnUrl")]
     public string? ReturnUrlQuery { get; set; }
 
-    protected override void OnInitialized() => _returnUrl = ReturnUrlQuery;
+    protected override async Task OnInitializedAsync()
+    {
+        _returnUrl = ReturnUrlQuery;
+        _passkeyAvailable = await WebAuthn.IsAvailableAsync();
+    }
 
     private async Task HandleCredentialsSubmitAsync()
     {
@@ -447,9 +467,69 @@
         StopCountdown();
         var wrappedDek = EncryptedBlob.FromBytes(result.CryptoMaterials!.EncryptedDek);
         byte[] dek = DekService.DecryptDek(wrappedDek, kek);
+        EstablishSessionAndNavigate(result, dek, _email);
+    }
 
+    /// <summary>
+    /// Passwordless, usernameless login (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf)
+    /// — no email/master password typed at all. The PRF output the authenticator just produced
+    /// stays strictly local: it derives the key that unwraps <c>PrfWrappedDek</c> right here, never
+    /// sent anywhere. Falls back to the visible email/master password form on any failure,
+    /// including a device/browser that doesn't support the PRF extension.
+    /// </summary>
+    private async Task StartPasskeyLoginAsync()
+    {
+        _errorMessage = null;
+        _passkeyBusy = true;
+        try
+        {
+            var begin = await AuthApi.BeginPasskeyLoginAsync();
+            var (responseJson, prfOutput) = await WebAuthn.AuthenticateWithPrfAsync(begin.OptionsJson);
+            if (responseJson is null)
+            {
+                _errorMessage = "Accesso con passkey annullato o non riuscito.";
+                return;
+            }
+
+            if (prfOutput is null)
+            {
+                _errorMessage = "Questo dispositivo non supporta l'accesso senza password. Usa email e master password.";
+                return;
+            }
+
+            var result = await AuthApi.CompletePasskeyLoginAsync(begin.CeremonyId, responseJson);
+            byte[]? prfWrappedDek = result.CryptoMaterials?.PrfWrappedDek;
+            if (!result.Success || result.AccessToken is null || result.RefreshToken is null || prfWrappedDek is null || result.Email is null)
+            {
+                _errorMessage = "Accesso con passkey non riuscito.";
+                return;
+            }
+
+            byte[] prfKek = PasskeyDekWrapKey.DeriveKey(prfOutput);
+            byte[] dek;
+            try
+            {
+                var wrappedDek = EncryptedBlob.FromBytes(prfWrappedDek);
+                dek = DekService.DecryptDek(wrappedDek, prfKek);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(prfKek);
+            }
+
+            StopCountdown();
+            EstablishSessionAndNavigate(result, dek, result.Email);
+        }
+        finally
+        {
+            _passkeyBusy = false;
+        }
+    }
+
+    private void EstablishSessionAndNavigate(LoginResponse result, byte[] dek, string email)
+    {
         var (userId, tenantId, role) = JwtParser.ParseAccessToken(result.AccessToken!);
-        Session.Establish(result.AccessToken!, result.RefreshToken!, dek, _email, userId, tenantId, role);
+        Session.Establish(result.AccessToken!, result.RefreshToken!, dek, email, userId, tenantId, role);
 
         if (!string.IsNullOrEmpty(_returnUrl))
         {

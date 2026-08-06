@@ -25,4 +25,7 @@ public interface ISecurityNotificationService
 
     /// <summary>A DEK rotation silently invalidated an existing recovery kit; the user should regenerate one if they still want it.</summary>
     Task NotifyRecoveryKitInvalidatedAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>A DEK rotation invalidated one or more passwordless-passkey wrapped DEK copies; the user should re-enable it per device if they still want it (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf).</summary>
+    Task NotifyPasskeyLoginInvalidatedAsync(Guid userId, CancellationToken ct = default);
 }

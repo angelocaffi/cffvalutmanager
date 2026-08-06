@@ -798,6 +798,102 @@ public sealed class AuthenticationTests : IDisposable
         Assert.Single(stillThere);
     }
 
+    // ---- Passwordless passkey login (WebAuthn PRF) -----------------------------------------
+
+    [Fact]
+    public async Task WebAuthnService_passkeyLoginRoundTrip_forAnEnrolledCredential_discoversTheUserAndReturnsItsPrfWrappedDek()
+    {
+        var (tenantId, adminId, authenticator, _, prfWrappedDek) = await RegisterPasswordlessCredentialAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new WebAuthnService(ctx, _fido2);
+
+        var begin = await service.BeginPasskeyLoginAsync();
+        var options = AssertionOptions.FromJson(begin.OptionsJson);
+        authenticator.SignCount++; // a real authenticator's counter strictly increases on every use.
+        string assertionResponse = authenticator.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, adminId.ToByteArray());
+
+        var result = await service.CompletePasskeyLoginAssertionAsync(begin.CeremonyId, assertionResponse);
+
+        Assert.NotNull(result);
+        Assert.Equal(adminId, result!.UserId);
+        Assert.Equal(prfWrappedDek, result.PrfWrappedDek);
+        Assert.Equal(tenantId, (await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId)).TenantId);
+    }
+
+    [Fact]
+    public async Task WebAuthnService_CompletePasskeyLoginAssertionAsync_forAnUnknownCredential_returnsNull()
+    {
+        var unregistered = new FakeWebAuthnAuthenticator();
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new WebAuthnService(ctx, _fido2);
+        var begin = await service.BeginPasskeyLoginAsync();
+        var options = AssertionOptions.FromJson(begin.OptionsJson);
+        string assertionResponse = unregistered.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, Guid.NewGuid().ToByteArray());
+
+        Assert.Null(await service.CompletePasskeyLoginAssertionAsync(begin.CeremonyId, assertionResponse));
+    }
+
+    [Fact]
+    public async Task WebAuthnService_CompletePasskeyLoginAssertionAsync_forACredentialNeverEnrolledForPasswordless_returnsNull()
+    {
+        // A normal MFA-only credential (no enablePasswordless, no PrfWrappedDek) — must not be
+        // usable for a passwordless login even though it's a real, valid credential.
+        var (_, adminId, authenticator) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var service = new WebAuthnService(ctx, _fido2);
+        var begin = await service.BeginPasskeyLoginAsync();
+        var options = AssertionOptions.FromJson(begin.OptionsJson);
+        string assertionResponse = authenticator.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, adminId.ToByteArray());
+
+        Assert.Null(await service.CompletePasskeyLoginAssertionAsync(begin.CeremonyId, assertionResponse));
+    }
+
+    [Fact]
+    public async Task AuthenticationService_CompletePasskeyLoginAsync_forAValidAssertion_returnsATokenAndTheAccountEmailAndPrfWrappedDek()
+    {
+        var (_, adminId, authenticator, _, prfWrappedDek) = await RegisterPasswordlessCredentialAsync(RandomAuthHash());
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+
+        var begin = await auth.BeginPasskeyLoginAsync();
+        var options = AssertionOptions.FromJson(begin.OptionsJson);
+        authenticator.SignCount++;
+        string assertionResponse = authenticator.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, adminId.ToByteArray());
+
+        var result = await auth.CompletePasskeyLoginAsync(begin.CeremonyId, assertionResponse, "1.2.3.4", "agent");
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
+        Assert.NotNull(result.RefreshToken);
+        Assert.Equal("admin@x.com", result.Email);
+        Assert.Equal(prfWrappedDek, result.CryptoMaterials!.PrfWrappedDek);
+
+        var claims = await _jwt.ValidateAsync(result.AccessToken!);
+        Assert.Equal(adminId, claims!.UserId);
+    }
+
+    [Fact]
+    public async Task AuthenticationService_CompletePasskeyLoginAsync_forAnUnknownCredential_failsGenerically()
+    {
+        var unregistered = new FakeWebAuthnAuthenticator();
+
+        using var ctx = CreateContext(Unresolved());
+        var auth = CreateAuthService(ctx);
+        var begin = await auth.BeginPasskeyLoginAsync();
+        var options = AssertionOptions.FromJson(begin.OptionsJson);
+        string assertionResponse = unregistered.CreateAssertionResponseJson(options, WebAuthnTestConfig.Origin, Guid.NewGuid().ToByteArray());
+
+        var result = await auth.CompletePasskeyLoginAsync(begin.CeremonyId, assertionResponse, null, null);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AccessToken);
+        Assert.Null(result.CryptoMaterials);
+    }
+
     private async Task<(Guid TenantId, Guid AdminId)> RegisterWebAuthnCredentialAsync(byte[] authHash)
     {
         var (tenantId, adminId, _) = await RegisterWebAuthnCredentialWithAuthenticatorAsync(authHash);
@@ -817,6 +913,24 @@ public sealed class AuthenticationTests : IDisposable
         await service.CompleteRegistrationAsync(adminId, attestationResponse, null);
 
         return (tenantId, adminId, authenticator);
+    }
+
+    /// <summary>Registers a discoverable, PRF-enabled credential (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf) with a fake, opaque PrfWrappedDek — WebAuthnService never inspects its contents, so any random bytes stand in for real ciphertext.</summary>
+    private async Task<(Guid TenantId, Guid AdminId, FakeWebAuthnAuthenticator Authenticator, byte[] PrfOutput, byte[] PrfWrappedDek)> RegisterPasswordlessCredentialAsync(byte[] authHash)
+    {
+        var (tenantId, adminId) = await ProvisionAsync(authHash);
+        var authenticator = new FakeWebAuthnAuthenticator();
+        byte[] prfOutput = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        byte[] prfWrappedDek = System.Security.Cryptography.RandomNumberGenerator.GetBytes(48);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var service = new WebAuthnService(ctx, _fido2);
+        string optionsJson = await service.BeginRegistrationAsync(adminId, enablePasswordless: true);
+        var options = CredentialCreateOptions.FromJson(optionsJson);
+        string attestationResponse = authenticator.CreateAttestationResponseJson(options, WebAuthnTestConfig.Origin, prfOutput);
+        await service.CompleteRegistrationAsync(adminId, attestationResponse, null, prfWrappedDek);
+
+        return (tenantId, adminId, authenticator, prfOutput, prfWrappedDek);
     }
 
     [Fact]

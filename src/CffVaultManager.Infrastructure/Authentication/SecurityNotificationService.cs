@@ -150,6 +150,28 @@ internal sealed class SecurityNotificationService : ISecurityNotificationService
             "Il tuo kit di recupero non è più valido: generane uno nuovo se lo desideri ancora.", ct);
     }
 
+    public async Task NotifyPasskeyLoginInvalidatedAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null)
+        {
+            return;
+        }
+
+        await SendEmailAsync(
+            user.Email,
+            "Accesso senza password disattivato sui tuoi dispositivi — CffVaultManager",
+            "Hai ruotato la chiave di cifratura del tuo vault: l'accesso senza password via passkey, " +
+            "se lo avevi attivato su uno o più dispositivi, non è più utilizzabile. Le passkey restano " +
+            "valide come fattore di sicurezza secondario; per tornare a usarle per l'accesso senza " +
+            "password, riattivalo dalle impostazioni di sicurezza sul dispositivo interessato.",
+            ct);
+
+        await CreateInAppNotificationAsync(
+            user.TenantId, userId, NotificationType.PasskeyLoginInvalidated,
+            "L'accesso senza password via passkey non è più valido sui tuoi dispositivi: riattivalo se lo desideri ancora.", ct);
+    }
+
     // Both channels below are deliberately best-effort: per ISecurityNotificationService, a
     // delivery failure here must never fail the underlying operation (login, master password
     // change, MFA disable) that already succeeded before this point.

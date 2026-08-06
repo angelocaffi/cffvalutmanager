@@ -14,6 +14,7 @@ builder.Services.AddSingleton<IAeadCipherService, AesGcmCipherService>();
 builder.Services.AddSingleton<IAsymmetricKeyExchangeService, X25519KeyExchangeService>();
 builder.Services.AddSingleton<IDekService, DekService>();
 builder.Services.AddSingleton<IAuthHashService, AuthHashService>();
+builder.Services.AddSingleton<IPasskeyDekWrapKeyService, PasskeyDekWrapKeyService>();
 builder.Services.AddSingleton<IRecoveryKeyService, RecoveryKeyService>();
 
 // Vault-item form helpers: password generation/strength, card and crypto-wallet format checks.

@@ -84,6 +84,94 @@ export async function register(optionsJson) {
     });
 }
 
+// --- Passwordless passkey login (WebAuthn PRF extension) ---------------------------------------
+// See docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf. The PRF output is
+// the client-side equivalent of the master password: it must NEVER be included in the JSON sent
+// to the server. register()/authenticate() above always forward the full clientExtensionResults
+// (Fido2NetLib deserializes it into a real, typed property server-side) — reusing them unmodified
+// with the PRF extension merely added to the request would leak that secret. buildPrfResult below
+// splits the browser's response into two independent values instead: a server-bound JSON string
+// with `prf` stripped out of clientExtensionResults, and the PRF output kept separate — callers
+// must keep the latter strictly client-side.
+
+function decodePrfExtension(extensions) {
+    const first = extensions?.prf?.eval?.first;
+    if (!first) {
+        return extensions;
+    }
+    return { ...extensions, prf: { eval: { first: base64UrlToBuffer(first) } } };
+}
+
+function buildPrfResult(credential, response) {
+    const extensionResults = credential.getClientExtensionResults();
+    const prfOutputBuffer = extensionResults?.prf?.results?.first ?? null;
+    const { prf, ...otherExtensionResults } = extensionResults ?? {};
+
+    const responseJson = JSON.stringify({
+        id: credential.id,
+        rawId: bufferToBase64Url(credential.rawId),
+        type: credential.type,
+        response,
+        clientExtensionResults: otherExtensionResults,
+    });
+
+    return {
+        responseJson,
+        // Null when the authenticator/browser doesn't support PRF (or didn't evaluate it) — the
+        // caller must fall back to master-password login in that case, never treat this as success.
+        prfOutput: prfOutputBuffer ? bufferToBase64Url(prfOutputBuffer) : null,
+    };
+}
+
+export async function registerWithPrf(optionsJson) {
+    const options = JSON.parse(optionsJson);
+    const publicKey = {
+        ...options,
+        challenge: base64UrlToBuffer(options.challenge),
+        user: { ...options.user, id: base64UrlToBuffer(options.user.id) },
+        excludeCredentials: decodeCredentialDescriptors(options.excludeCredentials),
+        extensions: decodePrfExtension(options.extensions),
+    };
+
+    let credential;
+    try {
+        credential = await navigator.credentials.create({ publicKey });
+    } catch (error) {
+        console.error(`Passwordless passkey registration failed: ${error.name}: ${error.message}`);
+        throw error;
+    }
+
+    return buildPrfResult(credential, {
+        attestationObject: bufferToBase64Url(credential.response.attestationObject),
+        clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+    });
+}
+
+export async function authenticateWithPrf(optionsJson) {
+    const options = JSON.parse(optionsJson);
+    const publicKey = {
+        ...options,
+        challenge: base64UrlToBuffer(options.challenge),
+        allowCredentials: decodeCredentialDescriptors(options.allowCredentials),
+        extensions: decodePrfExtension(options.extensions),
+    };
+
+    let credential;
+    try {
+        credential = await navigator.credentials.get({ publicKey });
+    } catch (error) {
+        console.error(`Passkey login failed: ${error.name}: ${error.message}`);
+        throw error;
+    }
+
+    return buildPrfResult(credential, {
+        authenticatorData: bufferToBase64Url(credential.response.authenticatorData),
+        clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+        signature: bufferToBase64Url(credential.response.signature),
+        userHandle: credential.response.userHandle ? bufferToBase64Url(credential.response.userHandle) : null,
+    });
+}
+
 export async function authenticate(optionsJson) {
     const options = JSON.parse(optionsJson);
     const publicKey = {

@@ -57,6 +57,62 @@ public sealed class WebAuthnJsInterop : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Drives <c>navigator.credentials.create()</c> with the WebAuthn PRF extension requested, for
+    /// passwordless-enrollment (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf).
+    /// <c>ResponseJson</c> is what the server verifies; <c>PrfOutput</c> never reaches the server —
+    /// callers must derive the DEK-wrap key from it locally and discard it once used. Both null if
+    /// the user cancelled or it failed; <c>PrfOutput</c> alone is null if the device/browser
+    /// registered the credential but doesn't support PRF (caller must fall back gracefully).
+    /// </summary>
+    public async Task<(string? ResponseJson, byte[]? PrfOutput)> RegisterWithPrfAsync(string credentialCreateOptionsJson)
+    {
+        var module = await _moduleTask.Value;
+        try
+        {
+            var result = await module.InvokeAsync<PrfCeremonyResult>("registerWithPrf", credentialCreateOptionsJson);
+            return (result.ResponseJson, DecodePrfOutput(result.PrfOutput));
+        }
+        catch (JSException)
+        {
+            return (null, null);
+        }
+    }
+
+    /// <summary>Same as <see cref="RegisterWithPrfAsync"/> but for a usernameless login assertion (<c>navigator.credentials.get()</c>).</summary>
+    public async Task<(string? ResponseJson, byte[]? PrfOutput)> AuthenticateWithPrfAsync(string assertionOptionsJson)
+    {
+        var module = await _moduleTask.Value;
+        try
+        {
+            var result = await module.InvokeAsync<PrfCeremonyResult>("authenticateWithPrf", assertionOptionsJson);
+            return (result.ResponseJson, DecodePrfOutput(result.PrfOutput));
+        }
+        catch (JSException)
+        {
+            return (null, null);
+        }
+    }
+
+    private static byte[]? DecodePrfOutput(string? base64Url)
+    {
+        if (base64Url is null)
+        {
+            return null;
+        }
+
+        string base64 = base64Url.Replace('-', '+').Replace('_', '/');
+        base64 = (base64.Length % 4) switch
+        {
+            2 => base64 + "==",
+            3 => base64 + "=",
+            _ => base64,
+        };
+        return Convert.FromBase64String(base64);
+    }
+
+    private sealed record PrfCeremonyResult(string ResponseJson, string? PrfOutput);
+
     public async ValueTask DisposeAsync()
     {
         if (_moduleTask.IsValueCreated)

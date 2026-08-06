@@ -18,7 +18,12 @@ public interface IWebAuthnService
     /// Starts a registration ceremony for an already-authenticated user and returns the
     /// <c>CredentialCreateOptions</c> JSON to hand to <c>navigator.credentials.create()</c>.
     /// </summary>
-    Task<string> BeginRegistrationAsync(Guid userId, CancellationToken ct = default);
+    /// <param name="enablePasswordless">
+    /// When true, requests a discoverable credential (<c>ResidentKey = Required</c>) with the
+    /// WebAuthn PRF extension, for passwordless login (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf).
+    /// When false (default), behavior is unchanged: a normal MFA-only, non-discoverable credential.
+    /// </param>
+    Task<string> BeginRegistrationAsync(Guid userId, bool enablePasswordless = false, CancellationToken ct = default);
 
     /// <summary>
     /// Verifies the browser's attestation response against the pending registration ceremony and,
@@ -26,7 +31,13 @@ public interface IWebAuthnService
     /// no matching ceremony is pending (expired, already consumed, or never started) or the
     /// attestation itself fails verification.
     /// </summary>
-    Task<Guid> CompleteRegistrationAsync(Guid userId, string attestationResponseJson, string? nickname, CancellationToken ct = default);
+    /// <param name="prfWrappedDek">
+    /// The caller's own DEK, wrapped client-side with a key derived from this ceremony's PRF
+    /// output — present only when the registration was started with <c>enablePasswordless: true</c>
+    /// and the browser/authenticator actually supports PRF. Opaque ciphertext to the server, same
+    /// trust level as <c>User.EncryptedDek</c>.
+    /// </param>
+    Task<Guid> CompleteRegistrationAsync(Guid userId, string attestationResponseJson, string? nickname, byte[]? prfWrappedDek = null, CancellationToken ct = default);
 
     /// <summary>Lists the user's own registered credentials (device-management view — never the public key or credential ID).</summary>
     Task<IReadOnlyList<WebAuthnCredentialDto>> ListCredentialsAsync(Guid userId, CancellationToken ct = default);
@@ -48,4 +59,20 @@ public interface IWebAuthnService
     /// ceremony, unknown credential, bad signature) — the caller can't distinguish which.
     /// </summary>
     Task<bool> CompleteAssertionAsync(Guid userId, string assertionResponseJson, CancellationToken ct = default);
+
+    /// <summary>
+    /// Starts a usernameless login assertion — no known user, unlike every other ceremony in this
+    /// interface. Requests a discoverable-credential lookup (no <c>allowCredentials</c>) with the
+    /// PRF extension, so the browser can offer an account picker with no prior email/username.
+    /// </summary>
+    Task<PasskeyLoginCeremony> BeginPasskeyLoginAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Verifies a usernameless assertion against its ceremony and discovers the user from the
+    /// assertion's credential id (the server's only way to identify who's logging in here). Returns
+    /// null uniformly for every failure mode (unknown/expired ceremony, unknown credential, a
+    /// credential never enrolled for passwordless, or a bad signature) — the caller can't
+    /// distinguish which, same anti-enumeration discipline as <see cref="CompleteAssertionAsync"/>.
+    /// </summary>
+    Task<PasskeyLoginAssertionResult?> CompletePasskeyLoginAssertionAsync(Guid ceremonyId, string assertionResponseJson, CancellationToken ct = default);
 }

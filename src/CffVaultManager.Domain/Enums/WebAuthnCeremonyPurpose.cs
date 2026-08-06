@@ -5,4 +5,7 @@ public enum WebAuthnCeremonyPurpose
 {
     Registration,
     Assertion,
+
+    /// <summary>A usernameless login assertion — no <see cref="Entities.WebAuthnCeremony.UserId"/> known yet at "begin" time.</summary>
+    PasskeyLogin,
 }

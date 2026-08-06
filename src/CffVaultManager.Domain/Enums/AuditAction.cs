@@ -38,4 +38,6 @@ public enum AuditAction
     AccountRecovered,
     RecoveryKitInvalidated,
     PaymentCaptured,
+    PasskeyLoginEnabled,
+    PasskeyLoginInvalidatedByRotation,
 }

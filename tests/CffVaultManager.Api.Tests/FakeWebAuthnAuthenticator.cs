@@ -25,8 +25,12 @@ internal sealed class FakeWebAuthnAuthenticator
 
     public uint SignCount { get; set; } = 1;
 
-    /// <summary>Builds a fake browser response to <c>navigator.credentials.create()</c> for the given server-issued options.</summary>
-    public string CreateAttestationResponseJson(CredentialCreateOptions options, string origin)
+    /// <summary>
+    /// Builds a fake browser response to <c>navigator.credentials.create()</c> for the given
+    /// server-issued options. <paramref name="prfOutput"/>, when given, mimics an authenticator
+    /// that supports the WebAuthn PRF extension and evaluated it (docs/security-model.md#sblocco-senza-password-via-passkey-webauthn-prf).
+    /// </summary>
+    public string CreateAttestationResponseJson(CredentialCreateOptions options, string origin, byte[]? prfOutput = null)
     {
         byte[] clientDataJson = BuildClientDataJson("webauthn.create", options.Challenge, origin);
         byte[] authData = BuildAuthData(options.Rp.Id!, FlagUserPresent | FlagUserVerified | FlagAttestedCredentialData, SignCount, BuildAttestedCredentialData());
@@ -42,12 +46,12 @@ internal sealed class FakeWebAuthnAuthenticator
                 attestationObject = Base64Url(attestationObject),
                 clientDataJSON = Base64Url(clientDataJson),
             },
-            clientExtensionResults = new { },
+            clientExtensionResults = BuildClientExtensionResults(prfOutput),
         });
     }
 
-    /// <summary>Builds a fake browser response to <c>navigator.credentials.get()</c> for the given server-issued options.</summary>
-    public string CreateAssertionResponseJson(AssertionOptions options, string origin, byte[] userHandle, byte flagsOverride = FlagUserPresent | FlagUserVerified)
+    /// <summary>Builds a fake browser response to <c>navigator.credentials.get()</c> for the given server-issued options. See <see cref="CreateAttestationResponseJson"/> for <paramref name="prfOutput"/>.</summary>
+    public string CreateAssertionResponseJson(AssertionOptions options, string origin, byte[] userHandle, byte flagsOverride = FlagUserPresent | FlagUserVerified, byte[]? prfOutput = null)
     {
         byte[] clientDataJson = BuildClientDataJson("webauthn.get", options.Challenge, origin);
         byte[] authData = BuildAuthData(options.RpId!, flagsOverride, SignCount, attestedCredentialData: null);
@@ -65,9 +69,14 @@ internal sealed class FakeWebAuthnAuthenticator
                 signature = Base64Url(signature),
                 userHandle = Base64Url(userHandle),
             },
-            clientExtensionResults = new { },
+            clientExtensionResults = BuildClientExtensionResults(prfOutput),
         });
     }
+
+    private static object BuildClientExtensionResults(byte[]? prfOutput) =>
+        prfOutput is null
+            ? new { }
+            : new { prf = new { results = new { first = Base64Url(prfOutput) } } };
 
     private byte[] SignAssertion(byte[] authData, byte[] clientDataJson)
     {

@@ -287,6 +287,42 @@ internal sealed class AuthenticationService : IAuthenticationService
         return await IssueSessionAsync(user, ip, userAgent, ct);
     }
 
+    public Task<PasskeyLoginCeremony> BeginPasskeyLoginAsync(CancellationToken ct = default) =>
+        _webAuthn.BeginPasskeyLoginAsync(ct);
+
+    public async Task<LoginResult> CompletePasskeyLoginAsync(Guid ceremonyId, string assertionResponseJson, string? ip, string? userAgent, CancellationToken ct = default)
+    {
+        var assertion = await _webAuthn.CompletePasskeyLoginAssertionAsync(ceremonyId, assertionResponseJson, ct);
+        if (assertion is null)
+        {
+            // Unknown ceremony/credential, a credential never enrolled for passwordless, or a bad
+            // signature — all uniformly a generic failure. No audit trail is possible here (unlike
+            // a wrong-password attempt against a known email): there is no user to attribute it to
+            // until the credential itself resolves one, same limitation LoginAsync already accepts
+            // for an unknown email.
+            return LoginResult.Failure();
+        }
+
+        var user = await _db.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == assertion.UserId, ct);
+
+        if (user is null)
+        {
+            return LoginResult.Failure();
+        }
+
+        if (IsLockedOut(user))
+        {
+            await WriteAuditAsync(user, AuditAction.LoginFailed, ip, userAgent, ct);
+            return LoginResult.Failure();
+        }
+
+        ResetLockoutState(user);
+
+        return await IssueSessionAsync(user, ip, userAgent, ct, prfWrappedDek: assertion.PrfWrappedDek);
+    }
+
     private async Task<IReadOnlyList<MfaFactor>> AvailableFactorsAsync(User user, CancellationToken ct)
     {
         var factors = new List<MfaFactor>();
@@ -343,10 +379,10 @@ internal sealed class AuthenticationService : IAuthenticationService
             user.KdfIterations,
             user.KdfVersion);
 
-        return LoginResult.Authenticated(access, rotated.PlainToken, materials);
+        return LoginResult.Authenticated(access, rotated.PlainToken, materials, user.Email);
     }
 
-    private async Task<LoginResult> IssueSessionAsync(User user, string? ip, string? userAgent, CancellationToken ct)
+    private async Task<LoginResult> IssueSessionAsync(User user, string? ip, string? userAgent, CancellationToken ct, byte[]? prfWrappedDek = null)
     {
         if (await IsTenantSuspendedAsync(user.TenantId, ct))
         {
@@ -372,9 +408,10 @@ internal sealed class AuthenticationService : IAuthenticationService
             user.MasterPasswordSalt,
             user.KdfMemoryKb,
             user.KdfIterations,
-            user.KdfVersion);
+            user.KdfVersion,
+            prfWrappedDek);
 
-        return LoginResult.Authenticated(access, refresh.PlainToken, materials);
+        return LoginResult.Authenticated(access, refresh.PlainToken, materials, user.Email);
     }
 
     private bool ValidateTotp(User user, string code)
