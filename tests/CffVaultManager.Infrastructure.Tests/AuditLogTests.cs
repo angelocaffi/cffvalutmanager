@@ -185,6 +185,40 @@ public sealed class AuditLogTests : IDisposable
         Assert.Equal(tenantId, entry.TenantId);
     }
 
+    [Fact]
+    public async Task MfaSetupService_DisableTotpAsync_clearsTheSecret_andWritesAnMfaDisabledAuditEntry()
+    {
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        byte[] secret = _totp.GenerateSecret();
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var adminUser = await ctx.Users.SingleAsync(u => u.Id == adminId);
+            adminUser.MfaSecret = _secretProtector.Protect(secret);
+            await ctx.SaveChangesAsync();
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            string code = new OtpNet.Totp(secret).ComputeTotp();
+            Assert.True(await new MfaSetupService(ctx, _totp, _secretProtector).ConfirmTotpAsync(adminId, code));
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            await new MfaSetupService(ctx, _totp, _secretProtector).DisableTotpAsync(adminId);
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        var user = await verify.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == adminId);
+        Assert.False(user.MfaEnabled);
+        Assert.Null(user.MfaSecret);
+
+        var entry = await verify.AuditLogEntries.IgnoreQueryFilters()
+            .SingleAsync(a => a.UserId == adminId && a.Action == AuditAction.MfaDisabled);
+        Assert.Equal(tenantId, entry.TenantId);
+    }
+
     // ---- AuditLogService reads --------------------------------------------------------------
 
     [Fact]

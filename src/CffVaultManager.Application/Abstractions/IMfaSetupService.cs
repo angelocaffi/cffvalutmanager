@@ -17,4 +17,7 @@ public interface IMfaSetupService
     /// Verifies the first code against the pending secret and, if valid, enables MFA for the user.
     /// </summary>
     Task<bool> ConfirmTotpAsync(Guid userId, string code, CancellationToken ct = default);
+
+    /// <summary>Turns TOTP off and discards the stored secret. Safe to call even if not enabled.</summary>
+    Task DisableTotpAsync(Guid userId, CancellationToken ct = default);
 }

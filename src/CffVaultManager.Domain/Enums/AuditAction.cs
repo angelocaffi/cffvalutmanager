@@ -10,6 +10,7 @@ public enum AuditAction
     Revoked,
     Revealed,
     MfaEnabled,
+    MfaDisabled,
     LoginSuccess,
     LoginFailed,
     AccountLocked,

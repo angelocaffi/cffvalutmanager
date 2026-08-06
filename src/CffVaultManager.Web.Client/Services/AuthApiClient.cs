@@ -304,6 +304,10 @@ public sealed class AuthApiClient
         return response.IsSuccessStatusCode;
     }
 
+    /// <summary>Turns TOTP off and discards the stored secret. Re-enabling later requires scanning a fresh QR code.</summary>
+    public async Task DisableTotpAsync(CancellationToken ct = default) =>
+        await _http.PostAsync("/api/auth/mfa/totp/disable", content: null, ct);
+
     // ---- Recovery kit (see docs/security-model.md#recovery-kit) --------------------------------
 
     /// <summary>Generates/regenerates a kit for the authenticated caller — overwrites any prior one.</summary>

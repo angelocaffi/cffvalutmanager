@@ -19,12 +19,18 @@ internal sealed class MfaSetupService : IMfaSetupService
     private readonly CffVaultManagerDbContext _db;
     private readonly ITotpService _totp;
     private readonly ISecretProtector _secretProtector;
+    private readonly ISecurityNotificationService? _securityNotifications;
 
-    public MfaSetupService(CffVaultManagerDbContext db, ITotpService totp, ISecretProtector secretProtector)
+    public MfaSetupService(
+        CffVaultManagerDbContext db,
+        ITotpService totp,
+        ISecretProtector secretProtector,
+        ISecurityNotificationService? securityNotifications = null)
     {
         _db = db;
         _totp = totp;
         _secretProtector = secretProtector;
+        _securityNotifications = securityNotifications;
     }
 
     public async Task<string> SetupTotpAsync(Guid userId, CancellationToken ct = default)
@@ -72,5 +78,30 @@ internal sealed class MfaSetupService : IMfaSetupService
         _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.MfaEnabled));
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task DisableTotpAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new InvalidOperationException("User not found.");
+
+        if (!user.MfaEnabled && user.MfaSecret is null)
+        {
+            return;
+        }
+
+        user.MfaEnabled = false;
+        // Discarded, not kept around for a possible "re-enable": a stale secret from before a
+        // Data Protection key-ring loss is exactly what caused the lockout this button exists to
+        // let people recover from themselves — re-enabling always goes through SetupTotpAsync
+        // again for a fresh secret and QR code.
+        user.MfaSecret = null;
+        _db.AuditLogEntries.Add(new AuditLogEntry(Guid.NewGuid(), user.TenantId, user.Id, AuditAction.MfaDisabled));
+        await _db.SaveChangesAsync(ct);
+
+        if (_securityNotifications is not null)
+        {
+            await _securityNotifications.NotifyMfaFactorDisabledAsync(user.Id, "l'autenticatore TOTP", ct);
+        }
     }
 }

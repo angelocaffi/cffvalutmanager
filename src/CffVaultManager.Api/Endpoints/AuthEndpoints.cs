@@ -174,6 +174,12 @@ internal static class AuthEndpoints
             return confirmed ? Results.Ok() : Results.BadRequest();
         }).RequireAuthorization();
 
+        app.MapPost("/api/auth/mfa/totp/disable", async (IMfaSetupService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            await service.DisableTotpAsync(tenantContext.UserId!.Value, ct);
+            return Results.NoContent();
+        }).RequireAuthorization();
+
         // Re-encrypts only the DEK (never a vault item) — see docs/security-model.md and
         // ChangeMasterPasswordService. Success revokes every active session (including the
         // caller's own), so every device must re-authenticate with the new master password.
