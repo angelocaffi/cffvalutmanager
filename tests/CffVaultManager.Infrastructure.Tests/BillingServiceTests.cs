@@ -173,6 +173,46 @@ public sealed class BillingServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateCheckoutAsync_forTheConfiguredVipEmail_usesTheVipPriceInstead()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("vip", "vip@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-VIP" };
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Billing:VipEmail"] = "vip@x.com",
+                ["Billing:VipAnnualPrice"] = "1.00",
+            })
+            .Build();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(ctx, config, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(1.00m, (await ctx.PaymentTransactions.SingleAsync()).Amount);
+        Assert.Equal(1.00m, payPal.LastCreateOrderAmount);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutAsync_forAnyOtherEmail_stillUsesTheDefaultPrice_evenWithVipConfigured()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("notvip", "notvip@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-DEFAULT" };
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Billing:AnnualPrice"] = "49.00",
+                ["Billing:VipEmail"] = "vip@x.com",
+                ["Billing:VipAnnualPrice"] = "1.00",
+            })
+            .Build();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(ctx, config, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(49.00m, (await ctx.PaymentTransactions.SingleAsync()).Amount);
+    }
+
+    [Fact]
     public async Task CaptureCheckoutAsync_forAnUnknownOrderId_throwsKeyNotFoundException()
     {
         var (tenantId, adminId) = await ProvisionAsync();

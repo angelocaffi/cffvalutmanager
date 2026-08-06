@@ -59,7 +59,18 @@ export async function register(optionsJson) {
         excludeCredentials: decodeCredentialDescriptors(options.excludeCredentials),
     };
 
-    const credential = await navigator.credentials.create({ publicKey });
+    let credential;
+    try {
+        credential = await navigator.credentials.create({ publicKey });
+    } catch (error) {
+        // The C# side (WebAuthnJsInterop.RegisterAsync) collapses every JSException into the
+        // same generic "registration failed" message for the user, so the actual DOMException
+        // (name + message — e.g. NotAllowedError, SecurityError) would otherwise be lost. Logging
+        // it here is often the only way to diagnose device-specific failures (passkey provider
+        // conflicts, RP ID mismatches, etc.) without physical access to the failing device.
+        console.error(`WebAuthn registration failed: ${error.name}: ${error.message}`);
+        throw error;
+    }
 
     return JSON.stringify({
         id: credential.id,
@@ -81,7 +92,13 @@ export async function authenticate(optionsJson) {
         allowCredentials: decodeCredentialDescriptors(options.allowCredentials),
     };
 
-    const credential = await navigator.credentials.get({ publicKey });
+    let credential;
+    try {
+        credential = await navigator.credentials.get({ publicKey });
+    } catch (error) {
+        console.error(`WebAuthn authentication failed: ${error.name}: ${error.message}`);
+        throw error;
+    }
 
     return JSON.stringify({
         id: credential.id,

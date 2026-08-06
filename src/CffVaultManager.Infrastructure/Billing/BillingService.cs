@@ -23,6 +23,8 @@ internal sealed class BillingService : IBillingService
     private readonly decimal _annualPrice;
     private readonly string _currency;
     private readonly string _planName;
+    private readonly string? _vipEmail;
+    private readonly decimal? _vipAnnualPrice;
 
     // payPal is optional so DI resolves it to the real client only when PayPal:ClientId/Secret
     // are configured — there is no safe no-op fallback for payments (see
@@ -35,6 +37,8 @@ internal sealed class BillingService : IBillingService
         _annualPrice = configuration.GetValue<decimal?>("Billing:AnnualPrice") ?? 49.00m;
         _currency = configuration["Billing:Currency"] ?? "EUR";
         _planName = configuration["Billing:PlanName"] ?? "Pro";
+        _vipEmail = configuration["Billing:VipEmail"];
+        _vipAnnualPrice = configuration.GetValue<decimal?>("Billing:VipAnnualPrice");
     }
 
     public async Task<BillingStatusDto> GetStatusAsync(Guid tenantId, CancellationToken ct = default)
@@ -53,12 +57,31 @@ internal sealed class BillingService : IBillingService
             throw new PayPalNotConfiguredException();
         }
 
-        string orderId = await _payPal.CreateOrderAsync(_annualPrice, _currency, ct);
+        decimal price = await ResolvePriceAsync(createdByUserId, ct);
+        string orderId = await _payPal.CreateOrderAsync(price, _currency, ct);
 
-        _db.PaymentTransactions.Add(new PaymentTransaction(Guid.NewGuid(), tenantId, createdByUserId, orderId, _annualPrice, _currency));
+        _db.PaymentTransactions.Add(new PaymentTransaction(Guid.NewGuid(), tenantId, createdByUserId, orderId, price, _currency));
         await _db.SaveChangesAsync(ct);
 
         return new CreateCheckoutResult(orderId);
+    }
+
+    /// <summary>
+    /// Almost always <see cref="_annualPrice"/>. If <c>Billing:VipEmail</c>/<c>VipAnnualPrice</c>
+    /// are configured (see docs/features/billing.md "Prezzo VIP opzionale") and the caller's own
+    /// account email matches, the configured override price is used instead — resolved
+    /// server-side from the authenticated user id, never from client input, so the "amount is
+    /// never a client input" invariant this service otherwise enforces still holds.
+    /// </summary>
+    private async Task<decimal> ResolvePriceAsync(Guid userId, CancellationToken ct)
+    {
+        if (_vipEmail is null || _vipAnnualPrice is null)
+        {
+            return _annualPrice;
+        }
+
+        string? email = await _db.Users.Where(u => u.Id == userId).Select(u => u.Email).FirstOrDefaultAsync(ct);
+        return string.Equals(email, _vipEmail, StringComparison.OrdinalIgnoreCase) ? _vipAnnualPrice.Value : _annualPrice;
     }
 
     public async Task<CaptureCheckoutResult> CaptureCheckoutAsync(Guid tenantId, Guid userId, string orderId, CancellationToken ct = default)

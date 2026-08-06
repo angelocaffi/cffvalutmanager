@@ -57,6 +57,8 @@ services:
       Email__FromDisplayName: CffVault
       PayPal__ClientId: ${PAYPAL_CLIENT_ID:-}
       PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
+      Billing__VipEmail: ${BILLING_VIP_EMAIL:-}
+      Billing__VipAnnualPrice: ${BILLING_VIP_ANNUAL_PRICE:-}
     ports:
       # Not meant to be reached directly in production — only `caddy` (80/443) should be open on
       # the host's external firewall. Left published for local testing without a domain/TLS.

@@ -14,9 +14,12 @@ internal sealed class FakePayPalClient : IPayPalClient
 
     public int CaptureOrderCallCount { get; private set; }
 
+    public decimal? LastCreateOrderAmount { get; private set; }
+
     public Task<string> CreateOrderAsync(decimal amount, string currency, CancellationToken ct = default)
     {
         CreateOrderCallCount++;
+        LastCreateOrderAmount = amount;
         return Task.FromResult(NextOrderId);
     }
 

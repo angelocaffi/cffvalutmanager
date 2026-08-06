@@ -99,6 +99,14 @@ Nuova pagina `Pages/Billing.razor` (`/billing`, `[Authorize]`, link in `MainLayo
    - `onError` → mostra un messaggio d'errore, nessun cambio di stato.
 3. Nessun redirect a pagina esterna: l'approvazione avviene nel popup gestito dall'SDK PayPal stesso (comportamento standard "Smart Buttons"), non serve gestire `return_url`/`cancel_url` lato nostro.
 
+## Prezzo VIP opzionale
+
+`BillingService` può applicare un prezzo diverso da `Billing:AnnualPrice` per un singolo account, tramite due chiavi di configurazione opzionali: `Billing:VipEmail`/`Billing:VipAnnualPrice` (env: `BILLING_VIP_EMAIL`/`BILLING_VIP_ANNUAL_PRICE`, vedi `.env.example`). Se entrambe non impostate (default), il comportamento è identico a oggi.
+
+Uso previsto: comp/test per l'account del titolare, non un sistema di piani/coupon per i clienti (quello resta esplicitamente fuori scope, vedi sopra). Per questo è una singola coppia email/prezzo da configurazione server, non una tabella di sconti — coerente con "nessuna feature ridondante" (CLAUDE.md).
+
+Il prezzo effettivo è risolto in `CreateCheckoutAsync` a partire dall'`Id` utente autenticato (`ITenantContext.UserId`, mai dal client), quindi l'invariante "l'importo non è mai un input del client" (vedi "Sicurezza" sopra) resta valido anche con l'override attivo. Le due chiavi vivono solo in `.env`/variabili d'ambiente, mai in `appsettings.json` con un valore reale — stessa disciplina già seguita per `PayPal:ClientSecret`.
+
 ## Migrazione (tenant esistenti)
 
 I tenant creati prima di questa feature non hanno `TrialEndsAt`. Migration EF Core con backfill dati: per ogni riga esistente, `TrialEndsAt = CreatedAt + 30 giorni` (se già nel passato, il tenant passa immediatamente in sola lettura al primo login successivo alla migrazione — accettato, sono solo tenant di sviluppo/test in questo momento, nessun tenant di produzione reale esiste ancora).
