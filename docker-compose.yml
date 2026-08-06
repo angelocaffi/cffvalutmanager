@@ -55,6 +55,7 @@ services:
       Email__UseStartTls: ${SMTP_USE_STARTTLS:-true}
       Email__FromAddress: ${SMTP_FROM_ADDRESS:-}
       Email__FromDisplayName: CffVault
+      PayPal__BaseUrl: ${PAYPAL_BASE_URL:-https://api-m.sandbox.paypal.com}
       PayPal__ClientId: ${PAYPAL_CLIENT_ID:-}
       PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
       Billing__VipEmail: ${BILLING_VIP_EMAIL:-}
