@@ -41,13 +41,27 @@ internal sealed class BillingService : IBillingService
         _vipAnnualPrice = configuration.GetValue<decimal?>("Billing:VipAnnualPrice");
     }
 
-    public async Task<BillingStatusDto> GetStatusAsync(Guid tenantId, CancellationToken ct = default)
+    public async Task<BillingStatusDto> GetStatusAsync(Guid tenantId, Guid callerId, CancellationToken ct = default)
     {
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct)
             ?? throw new KeyNotFoundException("Tenant not found.");
 
         var now = DateTimeOffset.UtcNow;
-        return new BillingStatusDto(tenant.PlanName, tenant.TrialEndsAt, tenant.PlanExpiresAt, tenant.IsReadOnly(now));
+        var pricing = await _db.Set<BillingPricing>().FirstOrDefaultAsync(p => p.Id == BillingPricing.SingletonId, ct);
+        decimal standardPrice = pricing?.StandardAnnualPrice ?? _annualPrice;
+        decimal effectivePrice = await ResolvePriceAsync(callerId, pricing, ct);
+        bool promoActive = pricing?.IsDiscountActive(now) ?? false;
+
+        return new BillingStatusDto(
+            tenant.PlanName,
+            tenant.TrialEndsAt,
+            tenant.PlanExpiresAt,
+            tenant.IsReadOnly(now),
+            standardPrice,
+            effectivePrice,
+            _currency,
+            promoActive ? pricing!.PromoMessage : null,
+            promoActive ? pricing!.DiscountExpiresAt : null);
     }
 
     public async Task<CreateCheckoutResult> CreateCheckoutAsync(Guid tenantId, Guid createdByUserId, CancellationToken ct = default)
@@ -57,7 +71,8 @@ internal sealed class BillingService : IBillingService
             throw new PayPalNotConfiguredException();
         }
 
-        decimal price = await ResolvePriceAsync(createdByUserId, ct);
+        var pricing = await _db.Set<BillingPricing>().FirstOrDefaultAsync(p => p.Id == BillingPricing.SingletonId, ct);
+        decimal price = await ResolvePriceAsync(createdByUserId, pricing, ct);
         string orderId = await _payPal.CreateOrderAsync(price, _currency, ct);
 
         _db.PaymentTransactions.Add(new PaymentTransaction(Guid.NewGuid(), tenantId, createdByUserId, orderId, price, _currency));
@@ -67,21 +82,27 @@ internal sealed class BillingService : IBillingService
     }
 
     /// <summary>
-    /// Almost always <see cref="_annualPrice"/>. If <c>Billing:VipEmail</c>/<c>VipAnnualPrice</c>
-    /// are configured (see docs/features/billing.md "Prezzo VIP opzionale") and the caller's own
-    /// account email matches, the configured override price is used instead — resolved
-    /// server-side from the authenticated user id, never from client input, so the "amount is
-    /// never a client input" invariant this service otherwise enforces still holds.
+    /// Precedence: (1) the VIP override if <c>Billing:VipEmail</c>/<c>VipAnnualPrice</c> are
+    /// configured (see docs/features/billing.md "Prezzo VIP opzionale") and the caller's own
+    /// account email matches — resolved server-side from the authenticated user id, never from
+    /// client input, so the "amount is never a client input" invariant this service otherwise
+    /// enforces still holds; (2) the SuperAdmin-configured <see cref="BillingPricing"/> row's
+    /// effective price (discount if currently active, else its standard price) if one exists; (3)
+    /// <see cref="_annualPrice"/>, the server-configured default, for an install where no
+    /// SuperAdmin has ever touched pricing.
     /// </summary>
-    private async Task<decimal> ResolvePriceAsync(Guid userId, CancellationToken ct)
+    private async Task<decimal> ResolvePriceAsync(Guid userId, BillingPricing? pricing, CancellationToken ct)
     {
-        if (_vipEmail is null || _vipAnnualPrice is null)
+        if (_vipEmail is not null && _vipAnnualPrice is not null)
         {
-            return _annualPrice;
+            string? email = await _db.Users.Where(u => u.Id == userId).Select(u => u.Email).FirstOrDefaultAsync(ct);
+            if (string.Equals(email, _vipEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                return _vipAnnualPrice.Value;
+            }
         }
 
-        string? email = await _db.Users.Where(u => u.Id == userId).Select(u => u.Email).FirstOrDefaultAsync(ct);
-        return string.Equals(email, _vipEmail, StringComparison.OrdinalIgnoreCase) ? _vipAnnualPrice.Value : _annualPrice;
+        return pricing?.EffectivePrice(DateTimeOffset.UtcNow) ?? _annualPrice;
     }
 
     public async Task<CaptureCheckoutResult> CaptureCheckoutAsync(Guid tenantId, Guid userId, string orderId, CancellationToken ct = default)

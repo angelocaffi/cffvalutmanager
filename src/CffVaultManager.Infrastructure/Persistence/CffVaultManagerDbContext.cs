@@ -60,6 +60,8 @@ public class CffVaultManagerDbContext : DbContext
 
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
 
+    public DbSet<BillingPricing> BillingPricing => Set<BillingPricing>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Configurations whose global query filter reads the current tenant take this
@@ -85,5 +87,6 @@ public class CffVaultManagerDbContext : DbContext
         modelBuilder.ApplyConfiguration(new TenantBillingProfileConfiguration(this));
         modelBuilder.ApplyConfiguration(new TenantProvisioningRequestConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentTransactionConfiguration(this));
+        modelBuilder.ApplyConfiguration(new BillingPricingConfiguration());
     }
 }

@@ -112,6 +112,89 @@ public sealed class AdminEndpointsTests : IAsyncLifetime
         Assert.Equal("Suspended", tenant.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task GetPricing_as_SuperAdmin_returns200()
+    {
+        string superAdminToken = await SeedAndLoginSuperAdminAsync(RandomBytes(32));
+
+        var response = await GetAuthorizedAsync("/api/admin/billing/pricing", superAdminToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetPricing_without_token_returns401()
+    {
+        var response = await _client.GetAsync("/api/admin/billing/pricing");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetPricing_as_tenant_admin_returns403()
+    {
+        string adminToken = await ProvisionAndLoginAsync("pricing-403", "admin@pricing403.test", RandomBytes(32));
+
+        var response = await GetAuthorizedAsync("/api/admin/billing/pricing", adminToken);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutPricing_as_SuperAdmin_persistsAndReturnsTheUpdatedPricing()
+    {
+        string superAdminToken = await SeedAndLoginSuperAdminAsync(RandomBytes(32));
+
+        var response = await SendAuthorizedAsync(HttpMethod.Put, "/api/admin/billing/pricing", superAdminToken, new
+        {
+            StandardAnnualPrice = 59.00m,
+            DiscountedAnnualPrice = 39.00m,
+            DiscountExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            PromoMessage = "Offerta di lancio",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(59.00m, body.RootElement.GetProperty("standardAnnualPrice").GetDecimal());
+        Assert.Equal(39.00m, body.RootElement.GetProperty("discountedAnnualPrice").GetDecimal());
+        Assert.True(body.RootElement.GetProperty("isDiscountActive").GetBoolean());
+
+        // Persisted, not just echoed back — a fresh GET reflects the same values.
+        var getResponse = await GetAuthorizedAsync("/api/admin/billing/pricing", superAdminToken);
+        using var getBody = JsonDocument.Parse(await getResponse.Content.ReadAsStringAsync());
+        Assert.Equal(59.00m, getBody.RootElement.GetProperty("standardAnnualPrice").GetDecimal());
+    }
+
+    [Fact]
+    public async Task PutPricing_as_tenant_admin_returns403()
+    {
+        string adminToken = await ProvisionAndLoginAsync("pricing-put-403", "admin@pricingput403.test", RandomBytes(32));
+
+        var response = await SendAuthorizedAsync(HttpMethod.Put, "/api/admin/billing/pricing", adminToken, new { StandardAnnualPrice = 59.00m });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutPricing_nonPositiveStandardPrice_returns400()
+    {
+        string superAdminToken = await SeedAndLoginSuperAdminAsync(RandomBytes(32));
+
+        var response = await SendAuthorizedAsync(HttpMethod.Put, "/api/admin/billing/pricing", superAdminToken, new { StandardAnnualPrice = 0m });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutPricing_discountedPriceHigherThanStandard_returns400()
+    {
+        string superAdminToken = await SeedAndLoginSuperAdminAsync(RandomBytes(32));
+
+        var response = await SendAuthorizedAsync(HttpMethod.Put, "/api/admin/billing/pricing", superAdminToken, new
+        {
+            StandardAnnualPrice = 49.00m,
+            DiscountedAnnualPrice = 59.00m,
+            DiscountExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private async Task ProvisionTenantAsync(string slug, string adminEmail, byte[] authHash)

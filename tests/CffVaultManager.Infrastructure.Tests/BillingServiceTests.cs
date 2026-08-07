@@ -45,7 +45,7 @@ public sealed class BillingServiceTests : IDisposable
         var (tenantId, adminId) = await ProvisionAsync();
 
         using var ctx = CreateContext(Tenant(tenantId, adminId));
-        var status = await new BillingService(ctx, EmptyConfig).GetStatusAsync(tenantId);
+        var status = await new BillingService(ctx, EmptyConfig).GetStatusAsync(tenantId, adminId);
 
         Assert.False(status.IsReadOnly);
         Assert.Null(status.PlanExpiresAt);
@@ -57,7 +57,7 @@ public sealed class BillingServiceTests : IDisposable
         var (tenantId, adminId) = await SeedExpiredTrialTenantAsync();
 
         using var ctx = CreateContext(Tenant(tenantId, adminId));
-        var status = await new BillingService(ctx, EmptyConfig).GetStatusAsync(tenantId);
+        var status = await new BillingService(ctx, EmptyConfig).GetStatusAsync(tenantId, adminId);
 
         Assert.True(status.IsReadOnly);
     }
@@ -242,6 +242,119 @@ public sealed class BillingServiceTests : IDisposable
         using var ctxB = CreateContext(Tenant(tenantB, adminB));
         await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             new BillingService(ctxB, EmptyConfig, payPal).CaptureCheckoutAsync(tenantA, adminB, orderId));
+    }
+
+    [Fact]
+    public async Task CreateCheckoutAsync_whenSuperAdminHasSetAStandardPrice_usesItInsteadOfTheConfigDefault()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("standard-override", "std@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-STD" };
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            ctx.Set<BillingPricing>().Add(new BillingPricing(59.00m, null, null, null, adminId));
+            await ctx.SaveChangesAsync();
+        }
+
+        using var checkout = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(checkout, EmptyConfig, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(59.00m, (await checkout.PaymentTransactions.SingleAsync()).Amount);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutAsync_whenADiscountIsActive_usesTheDiscountedPrice()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("discount-active", "disc@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-DISC" };
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            ctx.Set<BillingPricing>().Add(new BillingPricing(59.00m, 29.00m, DateTimeOffset.UtcNow.AddDays(7), "Promo", adminId));
+            await ctx.SaveChangesAsync();
+        }
+
+        using var checkout = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(checkout, EmptyConfig, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(29.00m, (await checkout.PaymentTransactions.SingleAsync()).Amount);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutAsync_whenTheDiscountHasExpired_fallsBackToTheStandardPrice()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("discount-expired", "exp@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-EXPIRED" };
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            ctx.Set<BillingPricing>().Add(new BillingPricing(59.00m, 29.00m, DateTimeOffset.UtcNow.AddDays(-1), "Promo scaduta", adminId, DateTimeOffset.UtcNow.AddDays(-8)));
+            await ctx.SaveChangesAsync();
+        }
+
+        using var checkout = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(checkout, EmptyConfig, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(59.00m, (await checkout.PaymentTransactions.SingleAsync()).Amount);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutAsync_vipOverride_takesPrecedenceOverAnActiveDiscount()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("vip-over-discount", "vip2@x.com");
+        var payPal = new FakePayPalClient { NextOrderId = "ORDER-VIP2" };
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Billing:VipEmail"] = "vip2@x.com",
+                ["Billing:VipAnnualPrice"] = "1.00",
+            })
+            .Build();
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            ctx.Set<BillingPricing>().Add(new BillingPricing(59.00m, 29.00m, DateTimeOffset.UtcNow.AddDays(7), null, adminId));
+            await ctx.SaveChangesAsync();
+        }
+
+        using var checkout = CreateContext(Tenant(tenantId, adminId));
+        await new BillingService(checkout, config, payPal).CreateCheckoutAsync(tenantId, adminId);
+
+        Assert.Equal(1.00m, (await checkout.PaymentTransactions.SingleAsync()).Amount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_whenADiscountIsActive_exposesTheEffectivePriceAndPromoMessage()
+    {
+        var (tenantId, adminId) = await ProvisionAsync("status-promo", "promo@x.com");
+        var expiry = DateTimeOffset.UtcNow.AddDays(7);
+
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            ctx.Set<BillingPricing>().Add(new BillingPricing(59.00m, 29.00m, expiry, "Sconto lancio", adminId));
+            await ctx.SaveChangesAsync();
+        }
+
+        using var read = CreateContext(Tenant(tenantId, adminId));
+        var status = await new BillingService(read, EmptyConfig).GetStatusAsync(tenantId, adminId);
+
+        Assert.Equal(59.00m, status.StandardAnnualPrice);
+        Assert.Equal(29.00m, status.EffectivePrice);
+        Assert.Equal("Sconto lancio", status.PromoMessage);
+        Assert.Equal(expiry, status.PromoExpiresAt);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_whenNoDiscountIsActive_promoFieldsAreNull()
+    {
+        var (tenantId, adminId) = await ProvisionAsync();
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var status = await new BillingService(ctx, EmptyConfig).GetStatusAsync(tenantId, adminId);
+
+        Assert.Null(status.PromoMessage);
+        Assert.Null(status.PromoExpiresAt);
+        Assert.Equal(status.StandardAnnualPrice, status.EffectivePrice);
     }
 
     // ---- Helpers ----------------------------------------------------------------------------

@@ -49,7 +49,16 @@ public sealed class BillingApiClient
     }
 }
 
-public sealed record BillingStatusResponse(string? PlanName, DateTimeOffset TrialEndsAt, DateTimeOffset? PlanExpiresAt, bool IsReadOnly);
+public sealed record BillingStatusResponse(
+    string? PlanName,
+    DateTimeOffset TrialEndsAt,
+    DateTimeOffset? PlanExpiresAt,
+    bool IsReadOnly,
+    decimal StandardAnnualPrice,
+    decimal EffectivePrice,
+    string Currency,
+    string? PromoMessage,
+    DateTimeOffset? PromoExpiresAt);
 
 public sealed record CreateCheckoutResponse(string OrderId);
 

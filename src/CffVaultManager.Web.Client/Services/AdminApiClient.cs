@@ -33,6 +33,26 @@ public sealed class AdminApiClient
 
     public async Task<bool> ReactivateTenantAsync(Guid tenantId, CancellationToken ct = default) =>
         (await _http.PostAsync($"/api/admin/tenants/{tenantId}/reactivate", content: null, ct)).IsSuccessStatusCode;
+
+    public async Task<BillingPricingResponse?> GetBillingPricingAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<BillingPricingResponse>("/api/admin/billing/pricing", JsonOptions, ct);
+
+    public async Task<(BillingPricingResponse? Pricing, string? Error)> UpdateBillingPricingAsync(
+        decimal standardAnnualPrice, decimal? discountedAnnualPrice, DateTimeOffset? discountExpiresAt, string? promoMessage, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync(
+            "/api/admin/billing/pricing",
+            new { StandardAnnualPrice = standardAnnualPrice, DiscountedAnnualPrice = discountedAnnualPrice, DiscountExpiresAt = discountExpiresAt, PromoMessage = promoMessage },
+            ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
+            return (null, error?.Error ?? "Impossibile aggiornare il prezzo.");
+        }
+
+        return (await response.Content.ReadFromJsonAsync<BillingPricingResponse>(JsonOptions, ct), null);
+    }
 }
 
 public sealed record TenantSummaryResponse(
@@ -62,3 +82,12 @@ public static class TenantStatuses
     public const string Suspended = "Suspended";
     public const string PendingSetup = "PendingSetup";
 }
+
+public sealed record BillingPricingResponse(
+    decimal StandardAnnualPrice,
+    decimal? DiscountedAnnualPrice,
+    DateTimeOffset? DiscountExpiresAt,
+    string? PromoMessage,
+    string Currency,
+    bool IsDiscountActive,
+    DateTimeOffset? UpdatedAt);

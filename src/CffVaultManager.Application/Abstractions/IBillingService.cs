@@ -7,7 +7,8 @@ namespace CffVaultManager.Application.Abstractions;
 /// </summary>
 public interface IBillingService
 {
-    Task<BillingStatusDto> GetStatusAsync(Guid tenantId, CancellationToken ct = default);
+    /// <summary><paramref name="callerId"/> resolves the VIP price override (if any) for <see cref="BillingStatusDto.EffectivePrice"/> — see BillingService.ResolvePriceAsync.</summary>
+    Task<BillingStatusDto> GetStatusAsync(Guid tenantId, Guid callerId, CancellationToken ct = default);
 
     /// <summary>
     /// Creates a PayPal order for the fixed, server-configured annual price and persists a

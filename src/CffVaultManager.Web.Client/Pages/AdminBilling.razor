@@ -1,0 +1,130 @@
+@page "/admin/billing"
+@attribute [Authorize(Roles = "SuperAdmin")]
+@using CffVaultManager.Web.Client.Services
+@inject AdminApiClient AdminApi
+
+<PageTitle>Prezzi abbonamento</PageTitle>
+
+<h1 class="h3 mb-1">Prezzi abbonamento</h1>
+<p class="text-body-secondary small mb-4">
+    Prezzo annuale valido per l'intera piattaforma. Un prezzo scontato con scadenza mostra un banner
+    promozionale a tutti gli utenti su <code>/billing</code> finché è attivo.
+</p>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+}
+
+@if (_saved)
+{
+    <div class="alert alert-success py-2" role="alert">Prezzo aggiornato.</div>
+}
+
+@if (_pricing is null)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    <div class="card" style="max-width: 32rem;">
+        <div class="card-body">
+            <form @onsubmit="SaveAsync" @onsubmit:preventDefault="true">
+                <div class="mb-3">
+                    <label class="form-label small text-body-secondary">Prezzo standard (@_pricing.Currency)</label>
+                    <input type="number" step="0.01" min="0.01" class="form-control" @bind="_standardPrice" required />
+                </div>
+
+                <hr />
+
+                <div class="mb-3">
+                    <label class="form-label small text-body-secondary">Prezzo scontato (@_pricing.Currency) — opzionale</label>
+                    <input type="number" step="0.01" min="0.01" class="form-control" @bind="_discountedPrice" placeholder="Nessuno sconto" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-body-secondary">Sconto valido fino al (incluso, 23:59 UTC)</label>
+                    <input type="date" class="form-control" @bind="_discountExpiresAtDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-body-secondary">Messaggio promozionale — opzionale, mostrato agli utenti</label>
+                    <textarea class="form-control" rows="2" maxlength="280" @bind="_promoMessage" placeholder="Es. Offerta di lancio, solo per pochi giorni!"></textarea>
+                </div>
+
+                @if (_pricing.IsDiscountActive)
+                {
+                    <p class="text-success small">
+                        Sconto attivo — gli utenti pagano @_pricing.DiscountedAnnualPrice?.ToString("0.00") @_pricing.Currency
+                        invece di @_pricing.StandardAnnualPrice.ToString("0.00") @_pricing.Currency.
+                    </p>
+                }
+
+                @if (_pricing.UpdatedAt is { } updatedAt)
+                {
+                    <p class="text-body-secondary small">Ultimo aggiornamento: @updatedAt.LocalDateTime.ToString("g")</p>
+                }
+
+                <button type="submit" class="btn btn-info" disabled="@_saving">
+                    @(_saving ? "Salvataggio…" : "Salva")
+                </button>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    private BillingPricingResponse? _pricing;
+    private string? _errorMessage;
+    private bool _saved;
+    private bool _saving;
+
+    private decimal _standardPrice;
+    private decimal? _discountedPrice;
+    private DateOnly? _discountExpiresAtDate;
+    private string? _promoMessage;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _pricing = await AdminApi.GetBillingPricingAsync();
+        if (_pricing is null)
+        {
+            return;
+        }
+
+        _standardPrice = _pricing.StandardAnnualPrice;
+        _discountedPrice = _pricing.DiscountedAnnualPrice;
+        _discountExpiresAtDate = _pricing.DiscountExpiresAt is { } expiresAt ? DateOnly.FromDateTime(expiresAt.LocalDateTime) : null;
+        _promoMessage = _pricing.PromoMessage;
+    }
+
+    private async Task SaveAsync()
+    {
+        _errorMessage = null;
+        _saved = false;
+        _saving = true;
+        try
+        {
+            DateTimeOffset? discountExpiresAt = _discountExpiresAtDate is { } date
+                ? new DateTimeOffset(date.Year, date.Month, date.Day, 23, 59, 59, TimeSpan.Zero)
+                : null;
+
+            var (pricing, error) = await AdminApi.UpdateBillingPricingAsync(_standardPrice, _discountedPrice, discountExpiresAt, _promoMessage);
+            if (pricing is null)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _pricing = pricing;
+            _saved = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

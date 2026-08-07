@@ -29,6 +29,24 @@ else
         </div>
     }
 
+    @if (_status.EffectivePrice < _status.StandardAnnualPrice)
+    {
+        <div class="alert alert-info" style="max-width: 32rem;" role="alert">
+            @if (!string.IsNullOrWhiteSpace(_status.PromoMessage))
+            {
+                <p class="mb-1">@_status.PromoMessage</p>
+            }
+            <p class="mb-0">
+                <span class="text-decoration-line-through text-body-secondary">@_status.StandardAnnualPrice.ToString("0.00") @_status.Currency</span>
+                <strong class="ms-2">@_status.EffectivePrice.ToString("0.00") @_status.Currency</strong>
+                @if (_status.PromoExpiresAt is { } promoExpiresAt)
+                {
+                    <span class="text-body-secondary"> — valido fino al @promoExpiresAt.LocalDateTime.ToString("d")</span>
+                }
+            </p>
+        </div>
+    }
+
     <div class="card" style="max-width: 32rem;">
         <div class="card-body">
             <h2 class="h5">Piano attuale</h2>
@@ -61,7 +79,8 @@ else
                 <h2 class="h5">Rinnova con PayPal</h2>
                 <p class="text-body-secondary small">
                     Pagamento singolo, non ricorrente: sblocca 12 mesi di accesso pieno a partire dalla scadenza
-                    attuale (se paghi in anticipo, i mesi si sommano a quelli residui).
+                    attuale (se paghi in anticipo, i mesi si sommano a quelli residui) —
+                    <strong>@_status.EffectivePrice.ToString("0.00") @_status.Currency</strong>.
                 </p>
 
                 @if (_errorMessage is not null)

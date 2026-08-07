@@ -50,6 +50,37 @@ internal static class AdminEndpoints
             }
         });
 
+        // Platform-wide subscription pricing (see docs/features/billing.md "Prezzo modificabile
+        // da SuperAdmin") — not tenant data, so it lives under /api/admin like the rest of this
+        // group rather than under /api/billing (tenant-facing checkout).
+        group.MapGet("/billing/pricing", async (IBillingPricingAdminService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(ct)));
+
+        group.MapPut("/billing/pricing", async (
+            UpdateBillingPricingRequest request, IBillingPricingAdminService service, ITenantContext tenantContext, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await service.UpdateAsync(
+                    request.StandardAnnualPrice,
+                    request.DiscountedAnnualPrice,
+                    request.DiscountExpiresAt,
+                    request.PromoMessage,
+                    tenantContext.UserId!.Value,
+                    ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         return app;
     }
 }
+
+internal sealed record UpdateBillingPricingRequest(
+    decimal StandardAnnualPrice,
+    decimal? DiscountedAnnualPrice,
+    DateTimeOffset? DiscountExpiresAt,
+    string? PromoMessage);

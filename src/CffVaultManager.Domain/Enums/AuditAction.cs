@@ -40,4 +40,5 @@ public enum AuditAction
     PaymentCaptured,
     PasskeyLoginEnabled,
     PasskeyLoginInvalidatedByRotation,
+    BillingPricingUpdated,
 }

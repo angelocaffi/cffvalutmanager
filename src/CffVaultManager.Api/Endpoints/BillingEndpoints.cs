@@ -16,7 +16,7 @@ internal static class BillingEndpoints
         var group = app.MapGroup("/api/billing").RequireAuthorization();
 
         group.MapGet("/status", async (IBillingService service, ITenantContext tenantContext, CancellationToken ct) =>
-            Results.Ok(await service.GetStatusAsync(tenantContext.TenantId!.Value, ct)));
+            Results.Ok(await service.GetStatusAsync(tenantContext.TenantId!.Value, tenantContext.UserId!.Value, ct)));
 
         // Only Admin can start/complete a payment (see multi-tenancy.md: Admin administers
         // organization-level settings) — an Operator can only read /status.
