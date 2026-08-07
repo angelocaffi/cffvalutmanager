@@ -279,7 +279,8 @@
                 return;
             }
 
-            CompleteLogin(result, kek.Key);
+            byte[] dek = UnwrapDek(result, kek.Key);
+            await EstablishSessionAndNavigateAsync(result, dek, _email);
         }
         catch (JsonException)
         {
@@ -344,8 +345,9 @@
                 return;
             }
 
-            CompleteLogin(result, _pendingKek);
+            byte[] dek = UnwrapDek(result, _pendingKek);
             ClearPendingKek();
+            await EstablishSessionAndNavigateAsync(result, dek, _email);
         }
         finally
         {
@@ -460,8 +462,9 @@
                 return;
             }
 
-            CompleteLogin(result, _pendingKek);
+            byte[] dek = UnwrapDek(result, _pendingKek);
             ClearPendingKek();
+            await EstablishSessionAndNavigateAsync(result, dek, _email);
         }
         finally
         {
@@ -470,12 +473,16 @@
         }
     }
 
-    private void CompleteLogin(LoginResponse result, ReadOnlySpan<byte> kek)
+    /// <summary>
+    /// Purely synchronous on purpose: <paramref name="kek"/> is a <see cref="ReadOnlySpan{T}"/> (a
+    /// ref struct), which the compiler forbids holding across an <c>await</c> — so the decrypt has
+    /// to finish here, before <see cref="EstablishSessionAndNavigateAsync"/> ever starts.
+    /// </summary>
+    private byte[] UnwrapDek(LoginResponse result, ReadOnlySpan<byte> kek)
     {
         StopCountdown();
         var wrappedDek = EncryptedBlob.FromBytes(result.CryptoMaterials!.EncryptedDek);
-        byte[] dek = DekService.DecryptDek(wrappedDek, kek);
-        EstablishSessionAndNavigate(result, dek, _email);
+        return DekService.DecryptDek(wrappedDek, kek);
     }
 
     /// <summary>
@@ -526,7 +533,7 @@
             }
 
             StopCountdown();
-            EstablishSessionAndNavigate(result, dek, result.Email);
+            await EstablishSessionAndNavigateAsync(result, dek, result.Email);
         }
         catch (JsonException)
         {
@@ -540,10 +547,21 @@
         }
     }
 
-    private void EstablishSessionAndNavigate(LoginResponse result, byte[] dek, string email)
+    private async Task EstablishSessionAndNavigateAsync(LoginResponse result, byte[] dek, string email)
     {
         var (userId, tenantId, role) = JwtParser.ParseAccessToken(result.AccessToken!);
         Session.Establish(result.AccessToken!, result.RefreshToken!, dek, email, userId, tenantId, role);
+
+        // Session.Establish fires SessionState.Changed synchronously, which
+        // VaultAuthenticationStateProvider turns into NotifyAuthenticationStateChanged — but
+        // Blazor propagates that into CascadingAuthenticationState/[Authorize] on its own render
+        // queue, not synchronously. Navigating right away can race ahead of that update, so the
+        // destination's [Authorize] check sees the *old* (unauthenticated) state and silently
+        // bounces back to /login — no exception, since this is normal [Authorize] redirect
+        // behavior, not an error. Found live: the server's own audit log confirmed a fully
+        // successful login (fresh refresh token issued) that still landed the user back on a
+        // blank login form. Yielding once here lets that pending notification finish first.
+        await Task.Yield();
 
         if (!string.IsNullOrEmpty(_returnUrl))
         {
