@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-
 namespace CffVaultManager.Web.Client.Services;
 
 /// <summary>
@@ -10,29 +7,22 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class NotificationApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public NotificationApiClient(HttpClient http) => _http = http;
 
     public async Task<IReadOnlyList<NotificationResponse>> ListAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<NotificationResponse>>("/api/notifications", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<NotificationResponse>("/api/notifications", ct);
 
+    /// <summary>0 on any failure — NotificationBell polls this on every route change (see docs/features/notifications.md), so this must never throw.</summary>
     public async Task<int> GetUnreadCountAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<int>("/api/notifications/unread-count", JsonOptions, ct);
+        await _http.GetJsonOrDefaultAsync<int>("/api/notifications/unread-count", ct);
 
-    public async Task MarkAsReadAsync(Guid id, CancellationToken ct = default)
-    {
-        var response = await _http.PostAsync($"/api/notifications/{id}/read", null, ct);
-        response.EnsureSuccessStatusCode();
-    }
+    public async Task<bool> MarkAsReadAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/api/notifications/{id}/read", null, ct)).IsSuccessStatusCode;
 
-    public async Task MarkAllAsReadAsync(CancellationToken ct = default)
-    {
-        var response = await _http.PostAsync("/api/notifications/read-all", null, ct);
-        response.EnsureSuccessStatusCode();
-    }
+    public async Task<bool> MarkAllAsReadAsync(CancellationToken ct = default) =>
+        (await _http.PostAsync("/api/notifications/read-all", null, ct)).IsSuccessStatusCode;
 }
 
 public sealed record NotificationResponse(

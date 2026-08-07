@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace CffVaultManager.Web.Client.Services;
 
@@ -11,22 +10,15 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class AdminApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public AdminApiClient(HttpClient http) => _http = http;
 
     public async Task<IReadOnlyList<TenantSummaryResponse>> ListTenantsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<TenantSummaryResponse>>("/api/admin/tenants", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<TenantSummaryResponse>("/api/admin/tenants", ct);
 
-    public async Task<TenantUsageResponse?> GetTenantUsageAsync(Guid tenantId, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync($"/api/admin/tenants/{tenantId}/usage", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<TenantUsageResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<TenantUsageResponse?> GetTenantUsageAsync(Guid tenantId, CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<TenantUsageResponse>($"/api/admin/tenants/{tenantId}/usage", ct);
 
     public async Task<bool> SuspendTenantAsync(Guid tenantId, CancellationToken ct = default) =>
         (await _http.PostAsync($"/api/admin/tenants/{tenantId}/suspend", content: null, ct)).IsSuccessStatusCode;
@@ -35,7 +27,7 @@ public sealed class AdminApiClient
         (await _http.PostAsync($"/api/admin/tenants/{tenantId}/reactivate", content: null, ct)).IsSuccessStatusCode;
 
     public async Task<BillingPricingResponse?> GetBillingPricingAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<BillingPricingResponse>("/api/admin/billing/pricing", JsonOptions, ct);
+        await _http.GetJsonOrDefaultAsync<BillingPricingResponse>("/api/admin/billing/pricing", ct);
 
     public async Task<(BillingPricingResponse? Pricing, string? Error)> UpdateBillingPricingAsync(
         decimal standardAnnualPrice, decimal? discountedAnnualPrice, DateTimeOffset? discountExpiresAt, string? promoMessage, CancellationToken ct = default)
@@ -47,11 +39,10 @@ public sealed class AdminApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var error = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (null, error?.Error ?? "Impossibile aggiornare il prezzo.");
+            return (null, await response.ReadErrorOrAsync("Impossibile aggiornare il prezzo.", ct));
         }
 
-        return (await response.Content.ReadFromJsonAsync<BillingPricingResponse>(JsonOptions, ct), null);
+        return (await response.ReadJsonOrDefaultAsync<BillingPricingResponse>(ct), null);
     }
 }
 

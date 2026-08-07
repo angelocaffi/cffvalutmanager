@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace CffVaultManager.Web.Client.Services;
 
@@ -12,23 +11,16 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class VaultMembershipApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public VaultMembershipApiClient(HttpClient http) => _http = http;
 
     /// <summary>The caller's own membership row for this vault, including their wrapped DEK. Null if the vault is personal, doesn't exist, or the caller isn't an active member.</summary>
-    public async Task<MyVaultMembershipResponse?> GetMyMembershipAsync(Guid vaultId, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync($"/api/vaults/{vaultId}/memberships/me", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<MyVaultMembershipResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<MyVaultMembershipResponse?> GetMyMembershipAsync(Guid vaultId, CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<MyVaultMembershipResponse>($"/api/vaults/{vaultId}/memberships/me", ct);
 
     public async Task<IReadOnlyList<VaultMembershipResponse>> ListMembersAsync(Guid vaultId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<VaultMembershipResponse>>($"/api/vaults/{vaultId}/memberships", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<VaultMembershipResponse>($"/api/vaults/{vaultId}/memberships", ct);
 
     /// <summary>Invites a user to an organization vault. Owner-of-vault only (enforced server-side).</summary>
     public async Task<(bool Success, VaultMembershipResponse? Membership, string? Error)> InviteAsync(
@@ -44,11 +36,10 @@ public sealed class VaultMembershipApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile invitare l'utente.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile invitare l'utente.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<VaultMembershipResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<VaultMembershipResponse>(ct), null);
     }
 
     /// <summary>Revokes a member and rotates the vault DEK atomically. Owner-of-vault only.</summary>
@@ -68,29 +59,17 @@ public sealed class VaultMembershipApiClient
             return (true, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, problem?.Error ?? "Impossibile revocare l'accesso.");
+        return (false, await response.ReadErrorOrAsync("Impossibile revocare l'accesso.", ct));
     }
 
     /// <summary>Looks up a same-tenant user's public key (and id) by email, to invite them by address.</summary>
-    public async Task<PublicKeyWithUserIdResponse?> GetPublicKeyByEmailAsync(string email, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync($"/api/tenant/users/by-email/{Uri.EscapeDataString(email)}/public-key", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<PublicKeyWithUserIdResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<PublicKeyWithUserIdResponse?> GetPublicKeyByEmailAsync(string email, CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<PublicKeyWithUserIdResponse>($"/api/tenant/users/by-email/{Uri.EscapeDataString(email)}/public-key", ct);
 
     /// <summary>Looks up a same-tenant user's public key by id — used when rewrapping the vault DEK for remaining members on revoke.</summary>
     public async Task<byte[]?> GetPublicKeyByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/api/tenant/users/{userId}/public-key", ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        var dto = await response.Content.ReadFromJsonAsync<PublicKeyWithUserIdResponse>(JsonOptions, ct);
+        var dto = await _http.GetJsonOrDefaultAsync<PublicKeyWithUserIdResponse>($"/api/tenant/users/{userId}/public-key", ct);
         return dto?.PublicKey;
     }
 }

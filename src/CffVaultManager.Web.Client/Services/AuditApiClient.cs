@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-
 namespace CffVaultManager.Web.Client.Services;
 
 /// <summary>
@@ -11,8 +8,6 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class AuditApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public AuditApiClient(HttpClient http) => _http = http;
@@ -26,7 +21,7 @@ public sealed class AuditApiClient
             url += $"&action={Uri.EscapeDataString(action)}";
         }
 
-        return await _http.GetFromJsonAsync<IReadOnlyList<AuditLogEntryResponse>>(url, JsonOptions, ct) ?? [];
+        return await _http.GetJsonListOrEmptyAsync<AuditLogEntryResponse>(url, ct);
     }
 }
 

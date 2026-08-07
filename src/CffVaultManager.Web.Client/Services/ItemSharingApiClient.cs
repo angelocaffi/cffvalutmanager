@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace CffVaultManager.Web.Client.Services;
 
@@ -11,8 +10,6 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class ItemSharingApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public ItemSharingApiClient(HttpClient http) => _http = http;
@@ -36,11 +33,10 @@ public sealed class ItemSharingApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile condividere la voce.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile condividere la voce.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<ItemMembershipResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<ItemMembershipResponse>(ct), null);
     }
 
     /// <summary>Adds another member to an already-shared item — the item key itself doesn't change. Owner-only.</summary>
@@ -57,11 +53,10 @@ public sealed class ItemSharingApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile aggiungere il destinatario.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile aggiungere il destinatario.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<ItemMembershipResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<ItemMembershipResponse>(ct), null);
     }
 
     /// <summary>Revokes a member and rotates the item key atomically. Owner-only.</summary>
@@ -80,24 +75,18 @@ public sealed class ItemSharingApiClient
             return (true, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, problem?.Error ?? "Impossibile revocare l'accesso.");
+        return (false, await response.ReadErrorOrAsync("Impossibile revocare l'accesso.", ct));
     }
 
     public async Task<IReadOnlyList<ItemMembershipResponse>> ListMembersAsync(Guid itemId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<ItemMembershipResponse>>($"/api/items/{itemId}/memberships", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<ItemMembershipResponse>($"/api/items/{itemId}/memberships", ct);
 
     /// <summary>Items shared with the caller by someone else (excludes items the caller owns — those already appear in their own vault).</summary>
     public async Task<IReadOnlyList<SharedItemResponse>> GetSharedWithMeAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<SharedItemResponse>>("/api/shared-items", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<SharedItemResponse>("/api/shared-items", ct);
 
-    public async Task<SharedItemResponse?> GetSharedItemAsync(Guid itemId, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync($"/api/shared-items/{itemId}", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<SharedItemResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<SharedItemResponse?> GetSharedItemAsync(Guid itemId, CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<SharedItemResponse>($"/api/shared-items/{itemId}", ct);
 
     /// <summary>Updates a shared item's ciphertext in place — same key, no rotation. Editor or Owner only.</summary>
     public Task<HttpResponseMessage> UpdateSharedItemAsync(Guid itemId, byte[] encryptedPayload, CancellationToken ct = default) =>
@@ -106,26 +95,14 @@ public sealed class ItemSharingApiClient
     /// <summary>Looks up a same-tenant user's public key by email, to wrap an item key for them.</summary>
     public async Task<byte[]?> GetPublicKeyByEmailAsync(string email, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/api/tenant/users/by-email/{Uri.EscapeDataString(email)}/public-key", ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        var dto = await response.Content.ReadFromJsonAsync<PublicKeyResponse>(JsonOptions, ct);
+        var dto = await _http.GetJsonOrDefaultAsync<PublicKeyResponse>($"/api/tenant/users/by-email/{Uri.EscapeDataString(email)}/public-key", ct);
         return dto?.PublicKey;
     }
 
     /// <summary>Looks up a same-tenant user's public key by id — used when rewrapping for remaining members on revoke.</summary>
     public async Task<byte[]?> GetPublicKeyByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/api/tenant/users/{userId}/public-key", ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        var dto = await response.Content.ReadFromJsonAsync<PublicKeyResponse>(JsonOptions, ct);
+        var dto = await _http.GetJsonOrDefaultAsync<PublicKeyResponse>($"/api/tenant/users/{userId}/public-key", ct);
         return dto?.PublicKey;
     }
 }

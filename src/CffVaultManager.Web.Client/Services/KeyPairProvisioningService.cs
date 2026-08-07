@@ -50,7 +50,7 @@ public sealed class KeyPairProvisioningService : IDisposable
         try
         {
             var profile = await _authApi.GetProfileAsync();
-            if (profile.HasKeyPair)
+            if (profile is null || profile.HasKeyPair)
             {
                 return;
             }

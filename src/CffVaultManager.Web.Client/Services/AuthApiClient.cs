@@ -93,8 +93,7 @@ public sealed class AuthApiClient
             return (true, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, problem?.Error ?? "Impossibile creare l'organizzazione.");
+        return (false, await response.ReadErrorOrAsync("Impossibile creare l'organizzazione.", ct));
     }
 
     /// <summary>
@@ -154,12 +153,11 @@ public sealed class AuthApiClient
 
         if (response.IsSuccessStatusCode)
         {
-            var result = await response.Content.ReadFromJsonAsync<RequestTenantProvisioningResponse>(JsonOptions, ct);
+            var result = await response.ReadJsonOrDefaultAsync<RequestTenantProvisioningResponse>(ct);
             return (result?.RequestId, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (null, problem?.Error ?? "Impossibile inviare la richiesta di creazione organizzazione.");
+        return (null, await response.ReadErrorOrAsync("Impossibile inviare la richiesta di creazione organizzazione.", ct));
     }
 
     /// <summary>Confirms the code emailed by <see cref="RequestTenantProvisioningAsync"/>, actually provisioning the tenant.</summary>
@@ -214,9 +212,9 @@ public sealed class AuthApiClient
         return response.IsSuccessStatusCode;
     }
 
-    /// <summary>The caller's own account status, for rendering the security-settings page.</summary>
-    public async Task<UserProfileResponse> GetProfileAsync(CancellationToken ct = default) =>
-        (await _http.GetFromJsonAsync<UserProfileResponse>("/api/auth/me", JsonOptions, ct))!;
+    /// <summary>The caller's own account status, for rendering the security-settings page. Null on failure — Security.razor already treats null as "still loading".</summary>
+    public async Task<UserProfileResponse?> GetProfileAsync(CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<UserProfileResponse>("/api/auth/me", ct);
 
     /// <summary>
     /// Sets the caller's long-term X25519 keypair (see docs/features/sharing-access-control.md).
@@ -233,13 +231,8 @@ public sealed class AuthApiClient
     }
 
     /// <summary>The caller's own keypair, needed to unwrap something wrapped for them (e.g. a shared item's key). Null if none has been generated yet.</summary>
-    public async Task<KeyPairResponse?> GetKeyPairAsync(CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync("/api/auth/keypair", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<KeyPairResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<KeyPairResponse?> GetKeyPairAsync(CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<KeyPairResponse>("/api/auth/keypair", ct);
 
     /// <summary>
     /// Enables Email OTP as an MFA factor. Fails with a 409-derived message if the account's
@@ -253,8 +246,7 @@ public sealed class AuthApiClient
             return (true, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, problem?.Error ?? "Impossibile abilitare l'Email OTP.");
+        return (false, await response.ReadErrorOrAsync("Impossibile abilitare l'Email OTP.", ct));
     }
 
     public async Task DisableEmailOtpMfaAsync(CancellationToken ct = default) =>
@@ -293,12 +285,11 @@ public sealed class AuthApiClient
             return (true, null);
         }
 
-        var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, problem?.Error ?? "Impossibile registrare il dispositivo.");
+        return (false, await response.ReadErrorOrAsync("Impossibile registrare il dispositivo.", ct));
     }
 
     public async Task<IReadOnlyList<WebAuthnCredentialResponse>> ListWebAuthnCredentialsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<WebAuthnCredentialResponse>>("/api/auth/webauthn/credentials", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<WebAuthnCredentialResponse>("/api/auth/webauthn/credentials", ct);
 
     public async Task RemoveWebAuthnCredentialAsync(Guid credentialId, CancellationToken ct = default) =>
         await _http.PostAsync($"/api/auth/webauthn/credentials/{credentialId}/remove", content: null, ct);

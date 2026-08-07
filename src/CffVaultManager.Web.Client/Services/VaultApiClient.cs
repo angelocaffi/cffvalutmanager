@@ -19,10 +19,10 @@ public sealed class VaultApiClient
 
     public async Task<IReadOnlyList<VaultResponse>> ListVaultsAsync(CancellationToken ct = default)
     {
-        var personal = _http.GetFromJsonAsync<IReadOnlyList<VaultResponse>>("/api/vaults", JsonOptions, ct);
-        var organization = _http.GetFromJsonAsync<IReadOnlyList<VaultResponse>>("/api/vaults/organization", JsonOptions, ct);
+        var personal = _http.GetJsonListOrEmptyAsync<VaultResponse>("/api/vaults", ct);
+        var organization = _http.GetJsonListOrEmptyAsync<VaultResponse>("/api/vaults/organization", ct);
         await Task.WhenAll(personal, organization);
-        return [.. (await personal ?? []), .. (await organization ?? [])];
+        return [.. await personal, .. await organization];
     }
 
     /// <summary>
@@ -42,17 +42,16 @@ public sealed class VaultApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile creare il vault.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile creare il vault.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<VaultResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<VaultResponse>(ct), null);
     }
 
     // ---- Folders ------------------------------------------------------------------------------
 
     public async Task<IReadOnlyList<FolderResponse>> ListFoldersAsync(Guid vaultId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<FolderResponse>>($"/api/vaults/{vaultId}/folders", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<FolderResponse>($"/api/vaults/{vaultId}/folders", ct);
 
     public async Task<FolderResponse> CreateFolderAsync(Guid vaultId, string name, CancellationToken ct = default)
     {
@@ -64,7 +63,7 @@ public sealed class VaultApiClient
     // ---- Tags -----------------------------------------------------------------------------
 
     public async Task<IReadOnlyList<TagResponse>> ListTagsAsync(Guid vaultId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<TagResponse>>($"/api/vaults/{vaultId}/tags", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<TagResponse>($"/api/vaults/{vaultId}/tags", ct);
 
     public async Task<TagResponse> CreateTagAsync(Guid vaultId, string name, CancellationToken ct = default)
     {
@@ -79,10 +78,10 @@ public sealed class VaultApiClient
     // ---- Items ----------------------------------------------------------------------------
 
     public async Task<IReadOnlyList<VaultItemResponse>> ListItemsAsync(Guid vaultId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<VaultItemResponse>>($"/api/vaults/{vaultId}/items", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<VaultItemResponse>($"/api/vaults/{vaultId}/items", ct);
 
     public async Task<IReadOnlyList<VaultItemResponse>> ListTrashAsync(Guid vaultId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<VaultItemResponse>>($"/api/vaults/{vaultId}/items/trash", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<VaultItemResponse>($"/api/vaults/{vaultId}/items/trash", ct);
 
     public async Task<VaultItemResponse> GetItemAsync(Guid vaultId, Guid itemId, CancellationToken ct = default) =>
         (await _http.GetFromJsonAsync<VaultItemResponse>($"/api/vaults/{vaultId}/items/{itemId}", JsonOptions, ct))!;
@@ -97,11 +96,10 @@ public sealed class VaultApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile creare la voce.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile creare la voce.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<VaultItemResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<VaultItemResponse>(ct), null);
     }
 
     public async Task<(bool Success, VaultItemResponse? Item, string? Error)> UpdateItemAsync(
@@ -114,11 +112,10 @@ public sealed class VaultApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var problem = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-            return (false, null, problem?.Error ?? "Impossibile salvare la voce.");
+            return (false, null, await response.ReadErrorOrAsync("Impossibile salvare la voce.", ct));
         }
 
-        return (true, await response.Content.ReadFromJsonAsync<VaultItemResponse>(JsonOptions, ct), null);
+        return (true, await response.ReadJsonOrDefaultAsync<VaultItemResponse>(ct), null);
     }
 
     public async Task<bool> DeleteItemAsync(Guid vaultId, Guid itemId, CancellationToken ct = default) =>

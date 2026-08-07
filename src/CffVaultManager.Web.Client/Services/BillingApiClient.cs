@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-
 namespace CffVaultManager.Web.Client.Services;
 
 /// <summary>
@@ -9,14 +6,13 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class BillingApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public BillingApiClient(HttpClient http) => _http = http;
 
-    public async Task<BillingStatusResponse> GetStatusAsync(CancellationToken ct = default) =>
-        (await _http.GetFromJsonAsync<BillingStatusResponse>("/api/billing/status", JsonOptions, ct))!;
+    /// <summary>Null on any failure (network/non-2xx/unparseable body) — Billing.razor already treats null as "still loading", never a crash.</summary>
+    public async Task<BillingStatusResponse?> GetStatusAsync(CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<BillingStatusResponse>("/api/billing/status", ct);
 
     /// <summary>Creates a PayPal order for the fixed server-configured price; returns its order id to hand to the PayPal JS SDK.</summary>
     public async Task<(string? OrderId, string? Error)> CreateCheckoutAsync(CancellationToken ct = default)
@@ -32,7 +28,7 @@ public sealed class BillingApiClient
             return (null, "Impossibile avviare il pagamento.");
         }
 
-        var result = await response.Content.ReadFromJsonAsync<CreateCheckoutResponse>(JsonOptions, ct);
+        var result = await response.ReadJsonOrDefaultAsync<CreateCheckoutResponse>(ct);
         return (result?.OrderId, null);
     }
 
@@ -44,8 +40,8 @@ public sealed class BillingApiClient
             return (false, null, "Impossibile completare il pagamento.");
         }
 
-        var result = await response.Content.ReadFromJsonAsync<CaptureCheckoutResponse>(JsonOptions, ct);
-        return (result?.Success ?? false, result?.PlanExpiresAt, result is { Success: false } ? "Pagamento non completato da PayPal." : null);
+        var result = await response.ReadJsonOrDefaultAsync<CaptureCheckoutResponse>(ct);
+        return (result?.Success ?? false, result?.PlanExpiresAt, result is null or { Success: false } ? "Pagamento non completato da PayPal." : null);
     }
 }
 

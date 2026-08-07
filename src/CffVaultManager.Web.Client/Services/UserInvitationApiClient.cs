@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace CffVaultManager.Web.Client.Services;
 
@@ -10,17 +9,15 @@ namespace CffVaultManager.Web.Client.Services;
 /// </summary>
 public sealed class UserInvitationApiClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
     private readonly HttpClient _http;
 
     public UserInvitationApiClient(HttpClient http) => _http = http;
 
     public async Task<IReadOnlyList<TenantUserResponse>> ListUsersAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<TenantUserResponse>>("/api/tenant/users", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<TenantUserResponse>("/api/tenant/users", ct);
 
     public async Task<IReadOnlyList<PendingInvitationResponse>> ListPendingInvitationsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<IReadOnlyList<PendingInvitationResponse>>("/api/tenant/users/invitations", JsonOptions, ct) ?? [];
+        await _http.GetJsonListOrEmptyAsync<PendingInvitationResponse>("/api/tenant/users/invitations", ct);
 
     public async Task<(bool Success, string? Error)> InviteAsync(string email, string role, CancellationToken ct = default)
     {
@@ -30,20 +27,14 @@ public sealed class UserInvitationApiClient
             return (true, null);
         }
 
-        var error = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions, ct);
-        return (false, error?.Error ?? "Impossibile inviare l'invito.");
+        return (false, await response.ReadErrorOrAsync("Impossibile inviare l'invito.", ct));
     }
 
     public async Task<bool> RevokeInvitationAsync(Guid invitationId, CancellationToken ct = default) =>
         (await _http.PostAsync($"/api/tenant/users/invitations/{invitationId}/revoke", content: null, ct)).IsSuccessStatusCode;
 
-    public async Task<InvitationPreviewResponse?> GetInvitationPreviewAsync(string token, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync($"/api/tenant/users/invitations/{token}", ct);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<InvitationPreviewResponse>(JsonOptions, ct)
-            : null;
-    }
+    public async Task<InvitationPreviewResponse?> GetInvitationPreviewAsync(string token, CancellationToken ct = default) =>
+        await _http.GetJsonOrDefaultAsync<InvitationPreviewResponse>($"/api/tenant/users/invitations/{token}", ct);
 
     public async Task<(bool Success, string? Error)> CompleteInvitationAsync(
         string token, byte[] authHash, byte[] encryptedDek, byte[] masterPasswordSalt,

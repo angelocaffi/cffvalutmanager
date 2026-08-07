@@ -508,7 +508,16 @@ else
             return;
         }
 
-        await VaultApi.CreateFolderAsync(VaultId, _newFolderName.Trim());
+        try
+        {
+            await VaultApi.CreateFolderAsync(VaultId, _newFolderName.Trim());
+        }
+        catch (HttpRequestException)
+        {
+            _errorMessage = "Impossibile creare la cartella.";
+            return;
+        }
+
         _newFolderName = string.Empty;
         _folders = await VaultApi.ListFoldersAsync(VaultId);
     }
