@@ -31,57 +31,72 @@ else
 
     <div class="vault-shell">
         <aside class="vault-sidebar @(_selectedId is null ? "d-flex" : "d-none d-lg-flex")">
-            <div class="dropdown mb-3">
-                <button class="btn btn-info dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    Nuova voce
-                </button>
-                <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
-                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
-                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
-                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.SecureNote)">Nota sicura</a></li>
-                    <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.GenericSecret)">Secret generico</a></li>
-                </ul>
-            </div>
+            <div class="vault-sidebar-card">
+                <div class="dropdown">
+                    <button class="btn btn-info dropdown-toggle w-100 btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Nuova voce
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.Password)">Password</a></li>
+                        <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CreditCard)">Carta di credito</a></li>
+                        <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.CryptoWallet)">Crypto wallet</a></li>
+                        <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.SecureNote)">Nota sicura</a></li>
+                        <li><a class="dropdown-item" href="@NewItemUrl(VaultItemTypes.GenericSecret)">Secret generico</a></li>
+                    </ul>
+                </div>
 
-            <button type="button" class="vault-sidebar-link @(!_favoritesOnly && _selectedFolderId is null ? "active" : null)" @onclick="() => SetScope(null, false)">
-                <span>Tutte le voci</span>
-                <span class="vault-sidebar-count">@_items.Count</span>
-            </button>
-            <button type="button" class="vault-sidebar-link @(_favoritesOnly ? "active" : null)" @onclick="() => SetScope(_selectedFolderId, true)">
-                <span>★ Preferiti</span>
-                <span class="vault-sidebar-count">@_items.Count(i => i.IsFavorite)</span>
-            </button>
+                <div class="vault-sidebar-scope">
+                    <button type="button" class="vault-scope-link @(!_favoritesOnly && _selectedFolderId is null ? "active" : null)" @onclick="() => SetScope(null, false)">
+                        <span>Tutte le voci</span>
+                        <span class="vault-count-badge">@_items.Count</span>
+                    </button>
+                    <button type="button" class="vault-scope-link @(_favoritesOnly ? "active" : null)" @onclick="() => SetScope(_selectedFolderId, true)">
+                        <span>★ Preferiti</span>
+                        <span class="vault-count-badge">@_items.Count(i => i.IsFavorite)</span>
+                    </button>
+                </div>
 
-            <div class="vault-sidebar-heading">Tipo</div>
-            @foreach (var type in AllTypes)
-            {
-                <button type="button" class="vault-sidebar-link @(_typeFilter == type ? "active" : null)" @onclick="() => ToggleTypeFilter(type)">
-                    <span>@TypeLabel(type)</span>
-                    <span class="vault-sidebar-count">@_items.Count(i => i.Type == type)</span>
-                </button>
-            }
+                <div class="vault-sidebar-facet">
+                    <div class="vault-sidebar-heading">Tipo</div>
+                    <div class="vault-chip-row">
+                        @foreach (var type in AllTypes)
+                        {
+                            <button type="button" class="vault-chip @(_typeFilter == type ? "active" : null)" @onclick="() => ToggleTypeFilter(type)">
+                                @TypeLabel(type)
+                                <span class="vault-chip-count">@_items.Count(i => i.Type == type)</span>
+                            </button>
+                        }
+                    </div>
+                </div>
 
-            <div class="vault-sidebar-heading">Cartelle</div>
-            @foreach (var folder in _folders)
-            {
-                <button type="button" class="vault-sidebar-link @(_selectedFolderId == folder.Id ? "active" : null)" @onclick="() => SetScope(folder.Id, _favoritesOnly)">
-                    <span class="text-truncate vault-sidebar-link-label">@folder.Name</span>
-                    <span class="vault-sidebar-count">@_items.Count(i => i.FolderId == folder.Id)</span>
-                </button>
-            }
-            <form class="d-flex gap-1 mt-1" @onsubmit="CreateFolderAsync" @onsubmit:preventDefault="true">
-                <input class="form-control form-control-sm" placeholder="Nuova cartella…" @bind="_newFolderName" @bind:event="oninput" />
-                <button type="submit" class="btn btn-outline-secondary btn-sm" disabled="@string.IsNullOrWhiteSpace(_newFolderName)">+</button>
-            </form>
+                <div class="vault-sidebar-facet">
+                    <div class="vault-sidebar-heading">Cartelle</div>
+                    @if (_folders.Count > 0)
+                    {
+                        <div class="vault-chip-row">
+                            @foreach (var folder in _folders)
+                            {
+                                <button type="button" class="vault-chip @(_selectedFolderId == folder.Id ? "active" : null)" @onclick="() => SetScope(folder.Id, _favoritesOnly)">
+                                    <span class="vault-chip-label">@folder.Name</span>
+                                    <span class="vault-chip-count">@_items.Count(i => i.FolderId == folder.Id)</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                    <form class="d-flex gap-1 mt-2" @onsubmit="CreateFolderAsync" @onsubmit:preventDefault="true">
+                        <input class="form-control form-control-sm" placeholder="Nuova cartella…" @bind="_newFolderName" @bind:event="oninput" />
+                        <button type="submit" class="btn btn-outline-secondary btn-sm" disabled="@string.IsNullOrWhiteSpace(_newFolderName)">+</button>
+                    </form>
+                </div>
 
-            <div class="vault-sidebar-footer">
-                @if (_vaultAccess?.IsOrganizationVault == true)
-                {
-                    <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/members")">Gestisci membri</a>
-                }
-                <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/backup")">Backup</a>
-                <a class="vault-sidebar-link" href="@($"/vault/{VaultId}/trash")">Cestino</a>
+                <div class="vault-sidebar-footer">
+                    @if (_vaultAccess?.IsOrganizationVault == true)
+                    {
+                        <a href="@($"/vault/{VaultId}/members")">Gestisci membri</a>
+                    }
+                    <a href="@($"/vault/{VaultId}/backup")">Backup</a>
+                    <a href="@($"/vault/{VaultId}/trash")">Cestino</a>
+                </div>
             </div>
         </aside>
 

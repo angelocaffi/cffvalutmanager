@@ -27,23 +27,23 @@
                 <ul class="navbar-nav me-lg-auto mt-3 mt-lg-0 gap-lg-1">
                     @if (Session.Role == "SuperAdmin")
                     {
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/admin/tenants" Match="NavLinkMatch.Prefix">Amministrazione</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/admin/tenants" Match="NavLinkMatch.Prefix">Amministrazione</NavLink></li>
                     }
                     else
                     {
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/vault" Match="NavLinkMatch.Prefix">Vault</NavLink></li>
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/shared-with-me" Match="NavLinkMatch.Prefix">Condivisi con me</NavLink></li>
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink></li>
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/vault" Match="NavLinkMatch.Prefix">Vault</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/shared-with-me" Match="NavLinkMatch.Prefix">Condivisi con me</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink></li>
                     }
-                    <li class="nav-item"><NavLink class="nav-link text-white-50" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink></li>
+                    <li class="nav-item"><NavLink class="nav-link" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink></li>
                     @if (Session.Role != "SuperAdmin")
                     {
-                        <li class="nav-item"><NavLink class="nav-link text-white-50" href="/billing" Match="NavLinkMatch.Prefix">Abbonamento</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/billing" Match="NavLinkMatch.Prefix">Abbonamento</NavLink></li>
                     }
                 </ul>
-                <div class="d-flex align-items-center gap-3 mt-3 mt-lg-0">
-                    <span class="text-white-50 small">@Session.Email</span>
+                <div class="d-flex align-items-center gap-3 mt-3 mt-lg-0 app-navbar-user">
+                    <span class="app-navbar-email">@Session.Email</span>
                     <NotificationBell />
                     <button type="button" class="btn btn-outline-light btn-sm" @onclick="Lock">Blocca</button>
                 </div>
