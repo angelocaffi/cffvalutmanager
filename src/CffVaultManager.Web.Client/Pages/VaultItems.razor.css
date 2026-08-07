@@ -57,9 +57,18 @@
     font-weight: 600;
 }
 
+/* .vault-sidebar-link is a flex row (see above); a flex child's default min-width is auto, i.e.
+   "don't shrink below your own content" — that silently defeats text-truncate on a long folder
+   name (arbitrary user-entered text), forcing this row and the whole sidebar wider than the
+   viewport instead of actually ellipsizing. */
+.vault-sidebar-link-label {
+    min-width: 0;
+}
+
 .vault-sidebar-count {
     font-size: 0.75rem;
     color: var(--bs-secondary-color);
+    flex-shrink: 0;
 }
 
 .vault-sidebar-footer {
@@ -252,6 +261,16 @@
     box-shadow: 0 0.125rem 0.5rem rgba(var(--brand-navy-rgb), 0.06);
     padding: 1.25rem;
     min-height: 24rem;
+    /* Safety net for decrypted values this pane doesn't control the length of — URLs, seed
+       phrases, generic-secret field values — which can be one long unbroken token with no spaces
+       for the browser to wrap at, forcing the whole pane (and page) wider than the viewport. */
+    overflow-wrap: anywhere;
+}
+
+/* Same flex/min-width story as .vault-sidebar-link-label above, but for the selected item's title,
+   which is decrypted free-text and can be arbitrarily long. */
+.vault-detail-title {
+    min-width: 0;
 }
 
 [data-bs-theme="dark"] .vault-detail-pane {

@@ -306,6 +306,79 @@ a.card:hover {
     transition: background-color 0.1s ease-in-out;
 }
 
+/* ---- Data cards (AdminTenants.razor / PasswordHealth.razor / Activity.razor) ---------------
+ * A plain HTML `<table>` never reflows — on a phone it forces horizontal scroll by design. Below
+ * md, these three pages swap their `.table-responsive` for this stacked-card list instead (each
+ * page keeps the real `<table>` for md+ via `d-none d-md-block`, and this via `d-md-none`), the
+ * same "icon/title + key-value stack" idiom as VaultItems.razor's `.vault-row` cards, just generic
+ * enough to fit a column set that isn't always title+subtitle (e.g. an audit log row).
+ */
+
+.data-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.data-card {
+    background: var(--brand-surface);
+    border: 1px solid rgba(var(--brand-navy-rgb), 0.08);
+    border-radius: var(--bs-border-radius);
+    padding: 0.85rem 1rem;
+}
+
+[data-bs-theme="dark"] .data-card {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.data-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.data-card-title {
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.3rem 0;
+    font-size: 0.875rem;
+    border-top: 1px solid var(--bs-border-color);
+}
+
+.data-card-row:first-of-type {
+    border-top: none;
+}
+
+.data-card-row-label {
+    color: var(--bs-secondary-color);
+    flex-shrink: 0;
+}
+
+.data-card-row-value {
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.data-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+}
+
 /* ---- Badges ---------------------------------------------------------------------------------- */
 
 .badge {

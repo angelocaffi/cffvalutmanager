@@ -29,7 +29,7 @@ else if (_tenants.Count == 0)
 }
 else
 {
-    <div class="table-responsive">
+    <div class="table-responsive d-none d-md-block">
         <table class="table align-middle">
             <thead>
                 <tr>
@@ -134,6 +134,105 @@ else
                 }
             </tbody>
         </table>
+    </div>
+
+    <div class="data-card-list d-md-none">
+        @foreach (var tenant in _tenants)
+        {
+            <div class="data-card">
+                <div class="data-card-header">
+                    <span class="data-card-title">@tenant.Name</span>
+                    <span class="badge @StatusBadgeClass(tenant.Status)">@StatusLabel(tenant.Status)</span>
+                </div>
+                <div class="data-card-row">
+                    <span class="data-card-row-label">Slug</span>
+                    <span class="data-card-row-value font-monospace">@tenant.Slug</span>
+                </div>
+                <div class="data-card-row">
+                    <span class="data-card-row-label">Piano</span>
+                    <span class="data-card-row-value">@(tenant.PlanName ?? "—")</span>
+                </div>
+                <div class="data-card-row">
+                    <span class="data-card-row-label">Utenti / Vault</span>
+                    <span class="data-card-row-value">@tenant.UserCount / @tenant.VaultCount</span>
+                </div>
+                <div class="data-card-row">
+                    <span class="data-card-row-label">Creato il</span>
+                    <span class="data-card-row-value">@tenant.CreatedAt.ToLocalTime().ToString("g")</span>
+                </div>
+
+                @if (_confirmingTenantId == tenant.Id)
+                {
+                    <div class="alert @(_confirmReactivate ? "alert-success" : "alert-warning") py-2 mt-2 mb-0">
+                        <p class="mb-2">
+                            @(_confirmReactivate
+                                ? $"Riattivare l'accesso per \"{tenant.Name}\"? I suoi utenti potranno tornare ad accedere."
+                                : $"Sospendere \"{tenant.Name}\"? Nessun utente di questo tenant potrà più accedere (login e refresh bloccati) finché non lo riattivi.")
+                        </p>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn @(_confirmReactivate ? "btn-success" : "btn-danger") btn-sm" disabled="@_busy" @onclick="() => ConfirmAsync(tenant.Id)">
+                                @if (_busy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                                }
+                                Conferma
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="CancelConfirm">Annulla</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="data-card-actions">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ToggleDetailsAsync(tenant.Id)">
+                            @(_expandedTenantId == tenant.Id ? "Nascondi" : "Dettagli")
+                        </button>
+                        @if (tenant.Status == TenantStatuses.Suspended)
+                        {
+                            <button type="button" class="btn btn-outline-success btn-sm" disabled="@_busy" @onclick="() => RequestConfirm(tenant.Id, reactivate: true)">
+                                Riattiva
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => RequestConfirm(tenant.Id, reactivate: false)">
+                                Sospendi
+                            </button>
+                        }
+                    </div>
+                }
+
+                @if (_expandedTenantId == tenant.Id)
+                {
+                    <div class="mt-2 pt-2 border-top">
+                        @if (_usageLoading)
+                        {
+                            <div class="d-flex align-items-center gap-2 text-body-secondary">
+                                <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                <span>Caricamento utilizzo…</span>
+                            </div>
+                        }
+                        else if (_usage is null)
+                        {
+                            <span class="text-body-secondary small">Impossibile caricare i dati di utilizzo per questo tenant.</span>
+                        }
+                        else
+                        {
+                            <div class="data-card-row">
+                                <span class="data-card-row-label">Voci nei vault</span>
+                                <span class="data-card-row-value">@_usage.VaultItemCount</span>
+                            </div>
+                            <div class="data-card-row">
+                                <span class="data-card-row-label">Ultimo accesso utente</span>
+                                <span class="data-card-row-value">
+                                    @(_usage.LastUserLoginAt is { } lastLogin ? lastLogin.ToLocalTime().ToString("g") : "Mai")
+                                </span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
     </div>
 }
 

@@ -66,7 +66,7 @@ else
             @foreach (var folder in _folders)
             {
                 <button type="button" class="vault-sidebar-link @(_selectedFolderId == folder.Id ? "active" : null)" @onclick="() => SetScope(folder.Id, _favoritesOnly)">
-                    <span class="text-truncate">@folder.Name</span>
+                    <span class="text-truncate vault-sidebar-link-label">@folder.Name</span>
                     <span class="vault-sidebar-count">@_items.Count(i => i.FolderId == folder.Id)</span>
                 </button>
             }
@@ -171,7 +171,7 @@ else
                 <div class="d-flex align-items-center gap-2 mb-3">
                     <button type="button" class="btn btn-outline-secondary btn-sm d-lg-none" @onclick="() => _selectedId = null">← Indietro</button>
                     <span class="badge text-bg-secondary">@TypeLabel(selectedItem.Type)</span>
-                    <h2 class="h5 mb-0 text-truncate flex-grow-1">@(_summaries.GetValueOrDefault(selectedItem.Id)?.Title ?? "…")</h2>
+                    <h2 class="h5 mb-0 text-truncate flex-grow-1 vault-detail-title">@(_summaries.GetValueOrDefault(selectedItem.Id)?.Title ?? "…")</h2>
                     <button type="button" class="btn btn-link p-0" title="Preferito" disabled="@_busy" @onclick="() => ToggleFavoriteAsync(selectedItem)">
                         @(selectedItem.IsFavorite ? "★" : "☆")
                     </button>
