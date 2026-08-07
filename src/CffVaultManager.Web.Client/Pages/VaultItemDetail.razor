@@ -28,6 +28,10 @@
         <span>Caricamento…</span>
     </div>
 }
+else if (_notFound)
+{
+    <EmptyState Message="Voce non trovata o non più accessibile." />
+}
 else
 {
     <form @onsubmit="SaveAsync" @onsubmit:preventDefault="true" style="max-width: 32rem;">
@@ -164,6 +168,7 @@ else
     private string _effectiveType = string.Empty;
     private Guid? _folderId;
     private bool _loading = true;
+    private bool _notFound;
     private bool _busy;
     private bool _isFavorite;
     private string? _errorMessage;
@@ -193,13 +198,27 @@ else
     protected override async Task OnParametersSetAsync()
     {
         _errorMessage = null;
+        _notFound = false;
         _loading = true;
         try
         {
             if (ItemId is { } id)
             {
                 _isNew = false;
-                var item = await VaultApi.GetItemAsync(VaultId, id);
+                VaultItemResponse item;
+                try
+                {
+                    item = await VaultApi.GetItemAsync(VaultId, id);
+                }
+                catch (HttpRequestException)
+                {
+                    // Deleted, vault access revoked since the link was created/bookmarked, or a
+                    // stale URL from a browser tab restored under a different account (e.g. a
+                    // SuperAdmin, who has no vaults at all) — never crash the page over this.
+                    _notFound = true;
+                    return;
+                }
+
                 _effectiveType = item.Type;
                 _isFavorite = item.IsFavorite;
                 _folderId = item.FolderId;
