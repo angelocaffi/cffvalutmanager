@@ -560,8 +560,17 @@
         // bounces back to /login — no exception, since this is normal [Authorize] redirect
         // behavior, not an error. Found live: the server's own audit log confirmed a fully
         // successful login (fresh refresh token issued) that still landed the user back on a
-        // blank login form. Yielding once here lets that pending notification finish first.
-        await Task.Yield();
+        // blank login form.
+        //
+        // A single Task.Yield() only guarantees one hop through the current continuation queue —
+        // not enough when CascadingAuthenticationState needs more than one render pass to
+        // propagate (observed live: reliable for the plain-credentials and TOTP paths, but the
+        // WebAuthn path — which resumes from a real JS interop round-trip through the browser's
+        // native credential UI, not a plain managed continuation — needs a stronger guarantee).
+        // Task.Delay goes through the browser's actual setTimeout macrotask queue, which only runs
+        // after every currently queued microtask (including all pending Blazor render batches) has
+        // drained, so it reliably waits out however many render passes are needed.
+        await Task.Delay(1);
 
         if (!string.IsNullOrEmpty(_returnUrl))
         {
