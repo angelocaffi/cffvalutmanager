@@ -104,6 +104,7 @@ app.UseAuthorization();
 app.MapAuthEndpoints();
 app.MapRecoveryEndpoints();
 app.MapUserEndpoints();
+app.MapUserInvitationsEndpoints();
 app.MapAdminEndpoints();
 app.MapVaultEndpoints();
 app.MapFolderEndpoints();

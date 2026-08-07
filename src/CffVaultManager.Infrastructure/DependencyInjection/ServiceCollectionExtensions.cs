@@ -132,6 +132,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<IBillingPricingAdminService, BillingPricingAdminService>();
+        services.AddScoped<IUserInvitationService, UserInvitationService>();
+        services.AddHostedService<UserInvitationCleanupHostedService>();
 
         return services;
     }

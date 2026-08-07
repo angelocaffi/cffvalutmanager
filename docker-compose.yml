@@ -44,6 +44,9 @@ services:
       Cors__AllowedOrigins__0: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       WebAuthn__RelyingPartyId: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       WebAuthn__Origins__0: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      # Reused for the invitation email link (UserInvitationService) — Api and Web share the same
+      # public domain (see docs/deployment.md), no separate env var needed.
+      App__PublicUrl: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       # Caddy is the only reverse proxy in front of this container (see the `caddy` service below,
       # static IP 172.28.0.10 on this same network) — trusting its forwarded headers is what makes
       # rate-limiting/audit IP attribution see the real client IP instead of Caddy's, see Program.cs.

@@ -1,0 +1,151 @@
+@page "/invite/{Token}"
+@using System.Security.Cryptography
+@using CffVaultManager.Crypto
+@using CffVaultManager.Crypto.Abstractions
+@using CffVaultManager.Web.Client.Services
+@inject UserInvitationApiClient InvitationApi
+@inject IKeyDerivationService KeyDerivation
+@inject IAuthHashService AuthHashService
+@inject IDekService DekService
+
+<PageTitle>Accetta invito</PageTitle>
+
+<div class="auth-shell">
+    <div class="auth-panel">
+        <div class="auth-brand-panel d-none d-lg-flex">
+            <div class="auth-brand-panel-content">
+                <BrandMark IconClass="auth-brand-icon mb-2 d-block mx-auto" TextClass="auth-brand-text d-block" />
+                <p class="auth-brand-tagline">Ogni segreto della tua organizzazione resta cifrato end-to-end — nemmeno noi possiamo leggerlo.</p>
+            </div>
+        </div>
+        <div class="auth-form-panel">
+            <div class="auth-form-panel-inner">
+                <div class="d-flex align-items-center justify-content-center gap-2 mb-3 d-lg-none">
+                    <BrandMark IconClass="login-logo" TextClass="fs-5" />
+                </div>
+
+                @if (_loading)
+                {
+                    <div class="d-flex align-items-center gap-2 text-body-secondary justify-content-center">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Caricamento…</span>
+                    </div>
+                }
+                else if (_preview is null)
+                {
+                    <h1 class="h4 mb-3 text-primary text-center">Invito non valido</h1>
+                    <p class="text-body-secondary text-center">
+                        Questo invito non esiste più, è scaduto o è già stato utilizzato.
+                    </p>
+                    <a class="btn btn-info w-100" href="/login">Vai al login</a>
+                }
+                else if (_done)
+                {
+                    <h1 class="h4 mb-3 text-primary text-center">Account creato</h1>
+                    <p class="text-success">Il tuo account è pronto. Puoi ora accedere con le credenziali appena scelte.</p>
+                    <a class="btn btn-info w-100" href="/login">Vai al login</a>
+                }
+                else
+                {
+                    <h1 class="h4 mb-3 text-primary text-center">Unisciti a @_preview.TenantName</h1>
+                    <p class="text-body-secondary small text-center">
+                        @_preview.InvitedByEmail ti ha invitato a unirti come <strong>@_preview.Role</strong>. Scegli la tua master password per completare l'accesso.
+                    </p>
+
+                    <form @onsubmit="HandleSubmitAsync" @onsubmit:preventDefault="true">
+                        <div class="mb-3">
+                            <label for="invite-password" class="form-label">Master password</label>
+                            <input id="invite-password" type="password" class="form-control" @bind="_masterPassword" @bind:event="oninput"
+                                   required disabled="@_busy" minlength="12" autocomplete="new-password" />
+                            <div class="form-text">Almeno 12 caratteri. Non lascia mai il browser: viene usata solo per derivare la chiave di cifratura.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="invite-password-confirm" class="form-label">Conferma master password</label>
+                            <input id="invite-password-confirm" type="password" class="form-control" @bind="_masterPasswordConfirm" @bind:event="oninput"
+                                   required disabled="@_busy" autocomplete="new-password" />
+                        </div>
+
+                        @if (_errorMessage is not null)
+                        {
+                            <div class="alert alert-danger py-2" role="alert">@_errorMessage</div>
+                        }
+
+                        <button type="submit" class="btn btn-info w-100" disabled="@_busy">
+                            @if (_busy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                            }
+                            @(_busy ? "Creazione in corso…" : "Crea account")
+                        </button>
+                    </form>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private InvitationPreviewResponse? _preview;
+    private bool _done;
+
+    private string _masterPassword = string.Empty;
+    private string _masterPasswordConfirm = string.Empty;
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _preview = await InvitationApi.GetInvitationPreviewAsync(Token);
+        _loading = false;
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        _errorMessage = null;
+
+        if (_masterPassword != _masterPasswordConfirm)
+        {
+            _errorMessage = "Le due master password non coincidono.";
+            return;
+        }
+
+        if (_masterPassword.Length < 12)
+        {
+            _errorMessage = "La master password deve avere almeno 12 caratteri.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            byte[] salt = RandomNumberGenerator.GetBytes(16);
+            var kdfParams = Argon2Parameters.Default;
+
+            using var kek = await KeyDerivation.DeriveKekAsync(_masterPassword, salt, kdfParams);
+            byte[] authHash = AuthHashService.DeriveAuthHash(kek, _masterPassword);
+
+            byte[] dek = DekService.GenerateDek();
+            byte[] encryptedDek = DekService.EncryptDek(dek, kek.Key).ToBytes();
+            CryptographicOperations.ZeroMemory(dek);
+
+            var (success, error) = await InvitationApi.CompleteInvitationAsync(
+                Token, authHash, encryptedDek, salt, kdfParams.MemoryKb, kdfParams.Iterations, kdfParams.Version);
+
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _done = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

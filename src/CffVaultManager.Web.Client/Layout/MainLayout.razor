@@ -37,6 +37,10 @@
                         <li class="nav-item"><NavLink class="nav-link" href="/password-health" Match="NavLinkMatch.Prefix">Salute password</NavLink></li>
                         <li class="nav-item"><NavLink class="nav-link" href="/activity" Match="NavLinkMatch.Prefix">Attività</NavLink></li>
                     }
+                    @if (Session.Role == "Admin")
+                    {
+                        <li class="nav-item"><NavLink class="nav-link" href="/users" Match="NavLinkMatch.Prefix">Utenti</NavLink></li>
+                    }
                     <li class="nav-item"><NavLink class="nav-link" href="/security" Match="NavLinkMatch.Prefix">Sicurezza</NavLink></li>
                     @if (Session.Role != "SuperAdmin")
                     {

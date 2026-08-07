@@ -1,0 +1,183 @@
+@page "/users"
+@attribute [Authorize(Roles = "Admin")]
+@using CffVaultManager.Web.Client.Services
+@inject UserInvitationApiClient InvitationApi
+@inject SessionState Session
+
+<PageTitle>Utenti</PageTitle>
+
+<h1 class="h3 mb-1">Utenti</h1>
+<p class="text-body-secondary small mb-4">
+    Gli utenti aggiunti qui possono essere destinatari di condivisione (singole voci o vault di
+    organizzazione) all'interno della tua organizzazione.
+</p>
+
+@if (_loading)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Caricamento…</span>
+    </div>
+}
+else
+{
+    <div class="card mb-4" style="max-width: 40rem;">
+        <div class="card-body">
+            <h2 class="h5">Membri attuali</h2>
+            <ul class="list-group mb-0">
+                @foreach (var user in _users)
+                {
+                    <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span class="small">@user.Email @(user.Id == Session.UserId ? "(tu)" : "")</span>
+                        <span class="badge bg-secondary">@RoleLabel(user.Role)</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    @if (_pendingInvitations.Count > 0)
+    {
+        <div class="card mb-4" style="max-width: 40rem;">
+            <div class="card-body">
+                <h2 class="h5">Inviti in sospeso</h2>
+                <ul class="list-group mb-0">
+                    @foreach (var invitation in _pendingInvitations)
+                    {
+                        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <span class="small">
+                                @invitation.Email
+                                <span class="text-body-secondary"> — scade il @invitation.ExpiresAt.LocalDateTime.ToString("d")</span>
+                            </span>
+                            <span class="d-flex align-items-center gap-2">
+                                <span class="badge bg-secondary">@RoleLabel(invitation.Role)</span>
+                                <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => RevokeAsync(invitation.Id)">Revoca</button>
+                            </span>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
+
+    <div class="card" style="max-width: 40rem;">
+        <div class="card-body">
+            <h2 class="h5">Invita un utente</h2>
+            <form @onsubmit="InviteAsync" @onsubmit:preventDefault="true">
+                <div class="mb-2">
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-control" @bind="_inviteEmail" disabled="@_busy" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Ruolo</label>
+                    <select class="form-select" style="max-width: 12rem;" @bind="_inviteRole" disabled="@_busy">
+                        <option value="Operator">Operator</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-info btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_inviteEmail))">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    }
+                    Invita
+                </button>
+            </form>
+        </div>
+    </div>
+
+    @if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger py-2 mt-3" style="max-width: 40rem;" role="alert">@_errorMessage</div>
+    }
+    @if (_successMessage is not null)
+    {
+        <div class="alert alert-success py-2 mt-3" style="max-width: 40rem;" role="alert">@_successMessage</div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private IReadOnlyList<TenantUserResponse> _users = [];
+    private IReadOnlyList<PendingInvitationResponse> _pendingInvitations = [];
+
+    private string _inviteEmail = string.Empty;
+    private string _inviteRole = "Operator";
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _users = await InvitationApi.ListUsersAsync();
+            _pendingInvitations = await InvitationApi.ListPendingInvitationsAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task InviteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inviteEmail))
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _successMessage = null;
+        _busy = true;
+        try
+        {
+            var (success, error) = await InvitationApi.InviteAsync(_inviteEmail.Trim(), _inviteRole);
+            if (!success)
+            {
+                _errorMessage = error;
+                return;
+            }
+
+            _pendingInvitations = await InvitationApi.ListPendingInvitationsAsync();
+            _successMessage = "Invito inviato correttamente.";
+            _inviteEmail = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevokeAsync(Guid invitationId)
+    {
+        _errorMessage = null;
+        _successMessage = null;
+        _busy = true;
+        try
+        {
+            if (!await InvitationApi.RevokeInvitationAsync(invitationId))
+            {
+                _errorMessage = "Impossibile revocare l'invito.";
+                return;
+            }
+
+            _pendingInvitations = await InvitationApi.ListPendingInvitationsAsync();
+            _successMessage = "Invito revocato.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string RoleLabel(string role) => role switch
+    {
+        "Admin" => "Admin",
+        "Operator" => "Operator",
+        _ => role,
+    };
+}

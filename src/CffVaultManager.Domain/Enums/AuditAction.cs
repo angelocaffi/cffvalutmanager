@@ -41,4 +41,7 @@ public enum AuditAction
     PasskeyLoginEnabled,
     PasskeyLoginInvalidatedByRotation,
     BillingPricingUpdated,
+    UserInvited,
+    UserInvitationAccepted,
+    UserInvitationRevoked,
 }
