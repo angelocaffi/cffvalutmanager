@@ -32,6 +32,7 @@ Ogni feature ha un documento dedicato con: scopo, requisiti funzionali, requisit
 | [Import / export](import-export.md) | Migrazione da altri password manager, backup cifrato | Backlog |
 | [Condivisione e controllo accessi](sharing-access-control.md) | Condivisione singola voce, ruoli fini (owner/editor/viewer) | Backlog |
 | [Notifiche](notifications.md) | Alert di sicurezza (email), promemoria password compromesse | Backlog |
+| [Estensione browser](browser-extension.md) | Chrome/Edge (poi eventualmente Safari): salvataggio rapido nel vault durante la navigazione | Backlog |
 
 ## Come aggiungere una nuova feature
 

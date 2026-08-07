@@ -119,3 +119,7 @@ I tenant creati prima di questa feature non hanno `TrialEndsAt`. Migration EF Co
 ## Verifica dal vivo (sandbox PayPal)
 
 Prerequisito: app PayPal Developer sandbox (Client ID/Secret) e un account sandbox "Personal" (buyer di test) — vedi istruzioni fornite in chat. Flusso di verifica: login come Admin di un tenant in sola lettura (trial forzato scaduto in dev) → `/billing` → bottone PayPal → login con l'account sandbox Personal nel popup → approvazione → cattura confermata lato nostro → banner sola lettura sparito → scrittura di un vault item torna a funzionare.
+
+## Verifica dal vivo (produzione)
+
+Confermato in produzione (2026-08-07) su `cffvault.duckdns.org` con `PayPal:ClientId`/`ClientSecret` live: checkout completo tramite i PayPal Smart Buttons, cattura riuscita, piano esteso. Nota storica: subito dopo la configurazione delle credenziali live, `POST /v2/checkout/orders` falliva con `422 PAYEE_ACCOUNT_RESTRICTED` — non un bug applicativo, ma un blocco temporaneo sull'account Business PayPal stesso (verifica richiesta da PayPal, risolta lato dashboard PayPal). Se il checkout smette di funzionare in produzione, controllare prima lo stato dell'account su PayPal (Resolution Center) prima di sospettare un problema nel codice o nella configurazione.
