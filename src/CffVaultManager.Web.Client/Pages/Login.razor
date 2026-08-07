@@ -1,5 +1,6 @@
 @page "/login"
 @using System.Security.Cryptography
+@using System.Text.Json
 @using CffVaultManager.Crypto
 @using CffVaultManager.Crypto.Abstractions
 @implements IDisposable
@@ -274,11 +275,18 @@
 
             if (!result.Success || result.AccessToken is null || result.RefreshToken is null || result.CryptoMaterials is null)
             {
-                _errorMessage = "Email o master password errati.";
+                _errorMessage = result.FailureReason ?? "Email o master password errati.";
                 return;
             }
 
             CompleteLogin(result, kek.Key);
+        }
+        catch (JsonException)
+        {
+            // PreloginResponse has no Success flag to fall back on (unlike LoginResponse) — a
+            // non-2xx response here (most commonly 429 from AuthRateLimiting) throws instead,
+            // same crash class already fixed in AuthApiClient's LoginResponse-returning methods.
+            _errorMessage = "Troppi tentativi o errore del server. Riprova tra qualche minuto.";
         }
         finally
         {
@@ -332,7 +340,7 @@
             if (!result.Success || result.AccessToken is null || result.RefreshToken is null
                 || result.CryptoMaterials is null || _pendingKek is null)
             {
-                _errorMessage = "Verifica non riuscita.";
+                _errorMessage = result.FailureReason ?? "Verifica non riuscita.";
                 return;
             }
 
@@ -519,6 +527,12 @@
 
             StopCountdown();
             EstablishSessionAndNavigate(result, dek, result.Email);
+        }
+        catch (JsonException)
+        {
+            // PasskeyLoginBeginResponse has no Success flag — same crash class as
+            // HandleCredentialsSubmitAsync's PreloginAsync call above.
+            _errorMessage = "Troppi tentativi o errore del server. Riprova tra qualche minuto.";
         }
         finally
         {

@@ -23,6 +23,41 @@ public sealed class AuthApiClient
     public AuthApiClient(HttpClient http) => _http = http;
 
     /// <summary>
+    /// Every method below that returns a <c>LoginResponse</c>/<c>RecoveryVerifyResponse</c> relies
+    /// on this instead of parsing <paramref name="response"/> directly: a non-success status (most
+    /// commonly 429 from <c>AuthRateLimiting</c>, which every one of these endpoints is behind) can
+    /// come back with an empty or plain-text body, and <c>ReadFromJsonAsync</c> throws
+    /// <see cref="JsonException"/> on that — an unhandled exception that crashes the whole page
+    /// (found live: a WebAuthn MFA assertion hitting the rate limit crashed Login.razor instead of
+    /// showing "too many attempts"). Only ever parse JSON once the status is confirmed 2xx.
+    /// </summary>
+    private async Task<T> ReadJsonOrFailureAsync<T>(HttpResponseMessage response, Func<string, T> onFailure, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            var parsed = await response.Content.ReadFromJsonAsync<T>(JsonOptions, ct);
+            if (parsed is not null)
+            {
+                return parsed;
+            }
+        }
+
+        string message = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+            ? "Troppi tentativi. Riprova tra qualche minuto."
+            : "Si è verificato un errore imprevisto. Riprova.";
+        return onFailure(message);
+    }
+
+    private static LoginResponse FailedLogin(string reason) =>
+        new(Success: false, RequiresMfa: false, FailureReason: reason, AccessToken: null, RefreshToken: null,
+            MfaChallengeToken: null, AvailableMfaFactors: null, CryptoMaterials: null);
+
+    // RecoveryVerifyResponse has no message field of its own — the caller (Recovery.razor) already
+    // shows a fixed generic message on Success:false, same as every other real failure path.
+    private static RecoveryVerifyResponse FailedRecovery(string reason) =>
+        new(Success: false, RequiresMfa: false, MfaChallengeToken: null, AvailableMfaFactors: null, RecoveryToken: null);
+
+    /// <summary>
     /// Creates a new tenant and its first Admin user. All crypto material (auth hash, wrapped
     /// DEK, salt, KDF parameters) is generated client-side and sent as opaque bytes — the server
     /// never sees the master password or the unwrapped DEK. Fails with a 409-derived message if
@@ -145,7 +180,7 @@ public sealed class AuthApiClient
     public async Task<LoginResponse> LoginAsync(string email, byte[] authHash, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/api/auth/login", new { Email = email, AuthHash = authHash }, ct);
-        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<LoginResponse>(response, FailedLogin, ct);
     }
 
     /// <summary>
@@ -156,14 +191,14 @@ public sealed class AuthApiClient
     public async Task<LoginResponse?> RefreshAsync(string refreshToken, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/api/auth/refresh", new { RefreshToken = refreshToken }, ct);
-        return await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct);
+        return response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct) : null;
     }
 
     public async Task<LoginResponse> VerifyMfaAsync(string challengeToken, string code, string factor, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync(
             "/api/auth/mfa/verify", new { ChallengeToken = challengeToken, Code = code, Factor = factor }, ct);
-        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<LoginResponse>(response, FailedLogin, ct);
     }
 
     /// <summary>
@@ -286,7 +321,7 @@ public sealed class AuthApiClient
             "/api/auth/webauthn/assertion/complete",
             new { ChallengeToken = challengeToken, AssertionResponse = doc.RootElement },
             ct);
-        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<LoginResponse>(response, FailedLogin, ct);
     }
 
     /// <summary>
@@ -307,7 +342,7 @@ public sealed class AuthApiClient
             "/api/auth/webauthn/passkey-login/complete",
             new { CeremonyId = ceremonyId, AssertionResponse = doc.RootElement },
             ct);
-        return (await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<LoginResponse>(response, FailedLogin, ct);
     }
 
     // ---- TOTP (authenticator app) MFA setup ------------------------------------------------------
@@ -357,14 +392,14 @@ public sealed class AuthApiClient
     public async Task<RecoveryVerifyResponse> VerifyRecoveryAsync(string email, byte[] recoveryAuthHash, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/api/auth/recovery/verify", new { Email = email, RecoveryAuthHash = recoveryAuthHash }, ct);
-        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<RecoveryVerifyResponse>(response, FailedRecovery, ct);
     }
 
     public async Task<RecoveryVerifyResponse> VerifyRecoveryMfaAsync(string challengeToken, string code, string factor, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync(
             "/api/auth/recovery/verify-mfa", new { ChallengeToken = challengeToken, Code = code, Factor = factor }, ct);
-        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<RecoveryVerifyResponse>(response, FailedRecovery, ct);
     }
 
     public async Task<bool> SendRecoveryMfaEmailOtpAsync(string challengeToken, CancellationToken ct = default)
@@ -386,7 +421,7 @@ public sealed class AuthApiClient
             "/api/auth/recovery/webauthn/complete",
             new { ChallengeToken = challengeToken, AssertionResponse = doc.RootElement },
             ct);
-        return (await response.Content.ReadFromJsonAsync<RecoveryVerifyResponse>(JsonOptions, ct))!;
+        return await ReadJsonOrFailureAsync<RecoveryVerifyResponse>(response, FailedRecovery, ct);
     }
 
     /// <summary>Submits the new master password after the recovery flow proved Recovery Key possession (+MFA if enabled).</summary>
