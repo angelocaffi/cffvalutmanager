@@ -1,5 +1,6 @@
 @page "/recovery"
 @using System.Security.Cryptography
+@using System.Text.Json
 @using CffVaultManager.Crypto
 @using CffVaultManager.Crypto.Abstractions
 @implements IDisposable
@@ -313,6 +314,13 @@
             _dek = dek;
             _recoveryToken = result.RecoveryToken;
             _stage = Stage.NewPassword;
+        }
+        catch (JsonException)
+        {
+            // RecoveryStartResponse has no Success flag — a non-2xx response (most commonly 429
+            // from AuthRateLimiting) makes AuthApiClient throw instead of returning a failure
+            // shape, same crash class already fixed on the login flow.
+            _errorMessage = "Troppi tentativi o errore del server. Riprova tra qualche minuto.";
         }
         finally
         {
