@@ -6,7 +6,7 @@ Gestionale web per password, carte di credito e secrets in generale — un passw
 
 - **Backend**: ASP.NET Core Web API (.NET 10 LTS)
 - **Frontend**: Blazor WebAssembly (hosted) — confermato, vedi [docs/architecture.md](docs/architecture.md)
-- **Storage**: SQL Server, multi-tenant a schema condiviso con isolamento per `TenantId` — vedi [docs/multi-tenancy.md](docs/multi-tenancy.md)
+- **Storage**: PostgreSQL, multi-tenant a schema condiviso con isolamento per `TenantId` — vedi [docs/multi-tenancy.md](docs/multi-tenancy.md)
 - **Crittografia**: derivazione chiave da master password (Argon2id/PBKDF2) + cifratura simmetrica (AES-256-GCM) — vedi [docs/security-model.md](docs/security-model.md)
 
 > Stato: progetto in fase di scaffolding iniziale.
@@ -37,7 +37,7 @@ src/
   CffVaultManager.Api           -> ASP.NET Core minimal API
   CffVaultManager.Application   -> use case, DTO, validazione, risoluzione tenant
   CffVaultManager.Domain        -> entità di dominio, interfacce
-  CffVaultManager.Infrastructure -> EF Core (SQL Server), repository tenant-aware
+  CffVaultManager.Infrastructure -> EF Core (PostgreSQL), repository tenant-aware
   CffVaultManager.Crypto        -> derivazione chiavi e cifratura, compatibile WASM
 tests/
   CffVaultManager.Crypto.Tests

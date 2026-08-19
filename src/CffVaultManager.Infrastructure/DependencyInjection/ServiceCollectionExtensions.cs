@@ -25,7 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITenantContext, TenantContext>();
 
         services.AddDbContext<CffVaultManagerDbContext>(options =>
-            options.UseSqlServer(configuration.GetConnectionString("Default")));
+            options.UseNpgsql(configuration.GetConnectionString("Default")));
 
         services.AddScoped<ITenantAdministrationService, TenantAdministrationService>();
 

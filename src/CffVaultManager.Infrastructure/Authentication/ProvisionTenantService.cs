@@ -1,5 +1,6 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -36,8 +37,8 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         // letting a duplicate surface as an unhandled DbUpdateException from the SQL constraint.
         // The IgnoreQueryFilters bypass on Users mirrors AuthenticationService's login lookup — the
         // tenant isn't known yet, so this is a legitimate cross-tenant existence check.
-        if (await _db.Tenants.AnyAsync(t => t.Slug == request.TenantSlug, ct) ||
-            await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == request.AdminEmail, ct))
+        if (await _db.Tenants.AnyAsync(t => t.Slug == IdentifierNormalization.NormalizeSlug(request.TenantSlug), ct) ||
+            await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(request.AdminEmail), ct))
         {
             throw new InvalidOperationException("A tenant with this slug, or a user with this email, already exists.");
         }

@@ -1,5 +1,6 @@
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -39,8 +40,8 @@ internal sealed class TenantProvisioningRequestService : ITenantProvisioningRequ
 
         // Same proactive check as ProvisionTenantService — gives a clean 409 instead of only
         // discovering the clash at confirmation time, when the user has already left the form.
-        if (await _db.Tenants.AnyAsync(t => t.Slug == request.TenantSlug, ct) ||
-            await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == request.AdminEmail, ct))
+        if (await _db.Tenants.AnyAsync(t => t.Slug == IdentifierNormalization.NormalizeSlug(request.TenantSlug), ct) ||
+            await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(request.AdminEmail), ct))
         {
             throw new InvalidOperationException("A tenant with this slug, or a user with this email, already exists.");
         }

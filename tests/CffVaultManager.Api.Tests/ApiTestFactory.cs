@@ -13,7 +13,7 @@ namespace CffVaultManager.Api.Tests;
 
 /// <summary>
 /// Boots the real Api host (real DI wiring, real JWT/tenant-resolution middleware) against an
-/// in-memory SQLite database instead of SQL Server, mirroring the approach already used by
+/// in-memory SQLite database instead of PostgreSQL, mirroring the approach already used by
 /// CffVaultManager.Infrastructure.Tests. One instance == one isolated database.
 /// </summary>
 public sealed class ApiTestFactory : WebApplicationFactory<Program>
@@ -49,7 +49,7 @@ public sealed class ApiTestFactory : WebApplicationFactory<Program>
         {
             // AddDbContext accumulates provider-specific configuration onto the same
             // IDbContextOptionsConfiguration<T> registration; removing only DbContextOptions<T>
-            // leaves the SQL Server provider config behind and EF Core refuses to start with two
+            // leaves the Npgsql provider config behind and EF Core refuses to start with two
             // providers registered. Both descriptors must go before re-adding with SQLite.
             services.RemoveAll<DbContextOptions<CffVaultManagerDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<CffVaultManagerDbContext>>();

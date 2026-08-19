@@ -10,7 +10,7 @@ CffVaultManager.Web          -> host ASP.NET Core del client WASM (static files 
 CffVaultManager.Api          -> ASP.NET Core Web API (endpoint REST/minimal API)
 CffVaultManager.Application  -> use case, orchestrazione, DTO, validazione, risoluzione tenant
 CffVaultManager.Domain       -> entità di dominio, regole di business, interfacce
-CffVaultManager.Infrastructure -> EF Core (SQL Server), repository tenant-aware, provider di crittografia, integrazioni esterne
+CffVaultManager.Infrastructure -> EF Core (PostgreSQL), repository tenant-aware, provider di crittografia, integrazioni esterne
 CffVaultManager.Crypto       -> libreria dedicata a derivazione chiavi e cifratura (isolata per audit più semplice, compatibile WASM)
 ```
 

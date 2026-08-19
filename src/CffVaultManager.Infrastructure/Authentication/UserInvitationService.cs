@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -37,7 +38,7 @@ internal sealed class UserInvitationService : IUserInvitationService
         // Emails are globally unique (see UserConfiguration) — proactive check for a clean error
         // instead of only discovering the clash at accept time, same reasoning already used by
         // TenantProvisioningRequestService.RequestAsync.
-        if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email, ct))
+        if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct))
         {
             throw new InvalidOperationException("A user with this email already exists.");
         }
@@ -128,7 +129,7 @@ internal sealed class UserInvitationService : IUserInvitationService
 
         // Defense in depth against a race with another invitation/registration for the same
         // email between preview and accept — the unique index on Users.Email is the final backstop.
-        if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == invitation.Email, ct))
+        if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(invitation.Email), ct))
         {
             return null;
         }

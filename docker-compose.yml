@@ -5,25 +5,28 @@ networks:
         - subnet: 172.28.0.0/16
 
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+  postgres:
+    image: postgres:18-alpine
     networks:
       - appnet
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: CffVaultManager
     volumes:
-      - sqlserver-data:/var/opt/mssql
+      # No /data suffix: since Postgres 18, the official image stores data in a
+      # pg_ctlcluster-style, major-version-specific subdirectory under this exact mount point —
+      # mounting .../data directly (the pre-18 convention) makes the container refuse to start.
+      - postgres-data:/var/lib/postgresql
     ports:
       # Exposed only so `dotnet ef database update` can run from the host to apply migrations
       # (this project never auto-migrates on startup, see CLAUDE.md). Remove this mapping once
       # the database is reachable another way, or firewall it off, in a real deployment.
-      # Host port deliberately not 1433: a machine with its own local SQL Server instance (common
-      # for .NET dev boxes) already owns that port, and Docker Desktop's port-forwarding silently
-      # loses the race to it — connections to localhost:1433 land on the wrong SQL Server.
-      - "15433:1433"
+      # Host port deliberately not 5432: a machine with its own local Postgres instance (common
+      # for dev boxes) already owns that port — same defensive reasoning previously applied to
+      # SQL Server's 15433 mapping.
+      - "15432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -35,11 +38,11 @@ services:
     networks:
       - appnet
     depends_on:
-      sqlserver:
+      postgres:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__Default: Server=sqlserver;Database=CffVaultManager;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True
+      ConnectionStrings__Default: Host=postgres;Database=CffVaultManager;Username=postgres;Password=${POSTGRES_PASSWORD}
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
       Cors__AllowedOrigins__0: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       WebAuthn__RelyingPartyId: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
@@ -108,7 +111,7 @@ services:
       - "443:443"
 
 volumes:
-  sqlserver-data:
+  postgres-data:
   caddy-data:
   caddy-config:
   dataprotection-keys:

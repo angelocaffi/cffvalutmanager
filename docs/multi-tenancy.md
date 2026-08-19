@@ -33,7 +33,7 @@ Questo evita che "essere admin" diventi una backdoor implicita ai dati cifrati �
 
 Approccio scelto: **database condiviso, schema condiviso, isolamento a livello di riga tramite colonna `TenantId`**.
 
-Motivazione: rispetto a database-per-tenant o schema-per-tenant, questo modello scala meglio con un numero crescente di tenant di dimensioni piccole/medie (tipico di un vault SaaS), riduce il costo operativo (una sola istanza SQL Server da mantenere, patchare, backuppare) e si abbina bene a Entra Framework Core tramite **global query filters**.
+Motivazione: rispetto a database-per-tenant o schema-per-tenant, questo modello scala meglio con un numero crescente di tenant di dimensioni piccole/medie (tipico di un vault SaaS), riduce il costo operativo (una sola istanza PostgreSQL da mantenere, patchare, backuppare) e si abbina bene a Entity Framework Core tramite **global query filters**.
 
 Regole vincolanti:
 
@@ -87,7 +87,7 @@ L'integrazione di pagamento è ora formalizzata separatamente in [features/billi
 ## Scalabilità
 
 - **API**: stateless, scalabile orizzontalmente dietro load balancer (nessuna sessione in-memory grazie a JWT + refresh token).
-- **SQL Server**: partenza con istanza singola; colonna `TenantId` presente ovunque fin dall'inizio rende possibile in futuro:
+- **PostgreSQL**: partenza con istanza singola; colonna `TenantId` presente ovunque fin dall'inizio rende possibile in futuro:
   - Partizionamento orizzontale per `TenantId` (table partitioning) se un singolo tenant cresce molto.
   - Migrazione di tenant enterprise "rumorosi" verso un database dedicato (stessa struttura, connection string diversa risolta da `ITenantContext`) senza riscrivere la logica applicativa.
 - **Indicizzazione**: ogni indice su tabelle tenant-scoped deve avere `TenantId` come prima colonna, per garantire che le query restino efficienti anche con milioni di righe totali distribuite su molti tenant.

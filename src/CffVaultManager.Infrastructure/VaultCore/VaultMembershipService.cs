@@ -45,7 +45,7 @@ internal sealed class VaultMembershipService : IVaultMembershipService
 
     public async Task<PublicKeyDto> GetPublicKeyByEmailAsync(string email, Guid callerTenantId, CancellationToken ct = default)
     {
-        var target = await _db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
+        var target = await _db.Users.FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
         if (target is null || target.TenantId != callerTenantId)
         {
             throw new KeyNotFoundException("User not found.");

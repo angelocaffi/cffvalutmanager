@@ -115,6 +115,29 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task Provisioning_with_only_a_different_case_slug_or_email_is_still_treated_as_a_duplicate()
+    {
+        // Case-sensitivity regression test for the SQL Server -> PostgreSQL migration (see
+        // docs/data-model.md): SQL Server's default collation is case-insensitive, PostgreSQL is
+        // not, so Email/Slug must be normalized (lowercase) at write time regardless of provider —
+        // this test validates the application-level normalization itself, on SQLite, independent
+        // of any DB collation.
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            await new ProvisionTenantService(ctx, _authHashHasher).ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+        }
+
+        using var ctx2 = CreateContext(Unresolved());
+        var mixedCaseRequest = NewProvisionRequest(RandomAuthHash()) with
+        {
+            TenantSlug = "ACME",
+            AdminEmail = "Admin@X.com",
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new ProvisionTenantService(ctx2, _authHashHasher).ProvisionAsync(mixedCaseRequest));
+    }
+
+    [Fact]
     public async Task PreloginAsync_for_a_known_user_returns_their_real_salt_and_kdf_params()
     {
         var authHash = RandomAuthHash();
@@ -127,6 +150,19 @@ public sealed class AuthenticationTests : IDisposable
         Assert.Equal(65536, result.KdfMemoryKb);
         Assert.Equal(3, result.KdfIterations);
         Assert.Equal(1, result.KdfVersion);
+    }
+
+    [Fact]
+    public async Task Login_with_a_different_case_email_than_stored_still_succeeds()
+    {
+        var authHash = RandomAuthHash();
+        await ProvisionAsync(authHash);
+
+        using var ctx = CreateContext(Unresolved());
+        var result = await CreateAuthService(ctx).LoginAsync("Admin@X.com", authHash, "1.2.3.4", "agent");
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.AccessToken);
     }
 
     [Fact]

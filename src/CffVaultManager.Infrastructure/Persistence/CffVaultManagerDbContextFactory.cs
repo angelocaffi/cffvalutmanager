@@ -14,7 +14,7 @@ public sealed class CffVaultManagerDbContextFactory : IDesignTimeDbContextFactor
     public CffVaultManagerDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<CffVaultManagerDbContext>()
-            .UseSqlServer("Server=(local);Database=CffVaultManager;Trusted_Connection=True;TrustServerCertificate=True;")
+            .UseNpgsql("Host=localhost;Database=CffVaultManager;Username=postgres;Password=postgres;")
             .Options;
 
         return new CffVaultManagerDbContext(options, new DesignTimeTenantContext());

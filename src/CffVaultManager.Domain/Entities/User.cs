@@ -34,7 +34,7 @@ public class User
         DateTimeOffset createdAt)
     {
         Id = Guard.AgainstEmptyGuid(id);
-        Email = Guard.AgainstNullOrWhiteSpace(email);
+        Email = IdentifierNormalization.NormalizeEmail(Guard.AgainstNullOrWhiteSpace(email));
         Role = role;
         TenantId = tenantId;
         EncryptedDek = Guard.AgainstNullOrEmpty(encryptedDek);

@@ -11,7 +11,7 @@ namespace CffVaultManager.Api.Tests;
 /// <summary>
 /// End-to-end coverage of the Api host's JWT bearer authentication, tenant-resolution middleware,
 /// and role-based authorization, exercised over real HTTP against the real DI wiring in
-/// Program.cs (in-memory SQLite standing in for SQL Server — see <see cref="ApiTestFactory"/>).
+/// Program.cs (in-memory SQLite standing in for PostgreSQL — see <see cref="ApiTestFactory"/>).
 /// Business-rule coverage (tenant isolation at the query-filter level, login/MFA/refresh
 /// semantics) already lives in CffVaultManager.Infrastructure.Tests; these tests only prove the
 /// HTTP plumbing wires that logic up correctly.

@@ -1,4 +1,5 @@
 using CffVaultManager.Application.Abstractions;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -42,7 +43,7 @@ internal sealed class EmailVerificationService : IEmailVerificationService
     {
         // The tenant is not known from an email address alone (mirrors AuthenticationService's
         // pre-authentication login lookup): this is a legitimate cross-tenant existence check.
-        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email, ct);
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
         if (user is null || user.EmailVerifiedAt is not null)
         {
             return;
@@ -65,7 +66,7 @@ internal sealed class EmailVerificationService : IEmailVerificationService
 
     public async Task<bool> ConfirmAsync(string email, string code, string? ip, string? userAgent, CancellationToken ct = default)
     {
-        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email, ct);
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
         if (user is null)
         {
             // Unknown email leaves no audit trace, mirroring AuthenticationService.LoginAsync.

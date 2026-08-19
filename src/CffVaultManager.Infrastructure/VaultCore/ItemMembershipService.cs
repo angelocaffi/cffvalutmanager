@@ -43,7 +43,7 @@ internal sealed class ItemMembershipService : IItemMembershipService
             throw new InvalidOperationException("This item is already shared.");
         }
 
-        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == request.RecipientEmail, ct);
+        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(request.RecipientEmail), ct);
         if (recipient is null || recipient.TenantId != callerTenantId)
         {
             // Do not distinguish "no such user" from "other tenant": that would leak tenant membership.
@@ -94,7 +94,7 @@ internal sealed class ItemMembershipService : IItemMembershipService
             throw new InvalidOperationException("Only one owner can exist per item.");
         }
 
-        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == request.RecipientEmail, ct);
+        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(request.RecipientEmail), ct);
         if (recipient is null || recipient.TenantId != callerTenantId)
         {
             throw new KeyNotFoundException("User not found.");

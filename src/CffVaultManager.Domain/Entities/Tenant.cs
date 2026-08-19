@@ -27,7 +27,7 @@ public class Tenant
     {
         Id = Guard.AgainstEmptyGuid(id);
         Name = Guard.AgainstNullOrWhiteSpace(name);
-        Slug = Guard.AgainstNullOrWhiteSpace(slug);
+        Slug = IdentifierNormalization.NormalizeSlug(Guard.AgainstNullOrWhiteSpace(slug));
         Status = status;
         PlanName = planName;
         MaxUsers = maxUsers;

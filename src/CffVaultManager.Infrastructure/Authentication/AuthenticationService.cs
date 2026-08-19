@@ -3,6 +3,7 @@ using System.Text;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Crypto;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -98,7 +99,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         // The tenant is not known before authentication — same legitimate bypass as LoginAsync.
         var user = await _db.Users
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Email == email, ct);
+            .FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
 
         if (user?.MasterPasswordSalt is null || user.KdfMemoryKb is null || user.KdfIterations is null || user.KdfVersion is null)
         {
@@ -135,7 +136,7 @@ internal sealed class AuthenticationService : IAuthenticationService
         // bypass the tenant query filter: the user is looked up by their globally-unique email.
         var user = await _db.Users
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Email == email, ct);
+            .FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
 
         if (user is null)
         {

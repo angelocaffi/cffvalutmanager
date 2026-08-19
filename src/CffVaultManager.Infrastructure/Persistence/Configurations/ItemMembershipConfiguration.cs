@@ -37,7 +37,7 @@ internal sealed class ItemMembershipConfiguration : IEntityTypeConfiguration<Ite
         // audit and excluded from the constraint via the filtered index.
         builder.HasIndex(m => new { m.TenantId, m.VaultItemId, m.UserId })
             .IsUnique()
-            .HasFilter("[RevokedAt] IS NULL");
+            .HasFilter("\"RevokedAt\" IS NULL");
 
         builder.HasIndex(m => new { m.TenantId, m.UserId });
 

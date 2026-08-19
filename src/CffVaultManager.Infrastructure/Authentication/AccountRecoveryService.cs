@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Crypto;
+using CffVaultManager.Domain;
 using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
@@ -124,7 +125,7 @@ internal sealed class AccountRecoveryService : IAccountRecoveryService
     {
         // Pre-authentication: the tenant is not known yet, same legitimate bypass as
         // AuthenticationService.LoginAsync/PreloginAsync.
-        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email, ct);
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
         if (user?.RecoveryEncryptedDek is { } real)
         {
             return real;
@@ -138,7 +139,7 @@ internal sealed class AccountRecoveryService : IAccountRecoveryService
 
     public async Task<RecoveryVerifyResult> VerifyAsync(string email, byte[] recoveryAuthHash, string? ip, string? userAgent, CancellationToken ct = default)
     {
-        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email, ct);
+        var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
 
         if (user?.RecoveryKeyHash is null)
         {
