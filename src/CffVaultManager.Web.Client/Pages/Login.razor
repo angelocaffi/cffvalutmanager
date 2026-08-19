@@ -227,6 +227,13 @@
     private const int ResendCooldownSeconds = 60;
     private const int CodeExpirySeconds = 600;
 
+    // Argon2id targets 300-500ms, but under Blazor WASM (interpreted, no AOT) a long-lived tab
+    // with several prior heavy derivations already run can make it hang far longer — observed
+    // live, root cause not fully confirmed (see docs/features/encryption-key-management.md).
+    // Without this, that hang was silent: no error, no console output, page just stays "busy"
+    // forever. A generous timeout turns it into a recoverable message instead.
+    private static readonly TimeSpan KekDerivationTimeout = TimeSpan.FromSeconds(10);
+
     // Kept only for the short window between the two login steps (an MFA challenge); never
     // persisted anywhere, and zeroed as soon as it's no longer needed.
     private byte[]? _pendingKek;
@@ -251,7 +258,14 @@
             var prelogin = await AuthApi.PreloginAsync(_email);
             var kdfParams = new Argon2Parameters(prelogin.KdfMemoryKb, prelogin.KdfIterations, version: prelogin.KdfVersion);
 
-            using var kek = await KeyDerivation.DeriveKekAsync(_masterPassword, prelogin.MasterPasswordSalt, kdfParams);
+            var kekTask = KeyDerivation.DeriveKekAsync(_masterPassword, prelogin.MasterPasswordSalt, kdfParams);
+            if (await Task.WhenAny(kekTask, Task.Delay(KekDerivationTimeout)) != kekTask)
+            {
+                _errorMessage = "Il browser sta impiegando troppo tempo a elaborare la master password. Ricarica la pagina e riprova.";
+                return;
+            }
+
+            using var kek = await kekTask;
             byte[] authHash = AuthHashService.DeriveAuthHash(kek, _masterPassword);
 
             var result = await AuthApi.LoginAsync(_email, authHash);
