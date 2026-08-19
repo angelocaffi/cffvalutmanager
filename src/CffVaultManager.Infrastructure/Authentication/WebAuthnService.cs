@@ -7,6 +7,7 @@ using CffVaultManager.Infrastructure.Persistence;
 using Fido2NetLib;
 using Fido2NetLib.Objects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CffVaultManager.Infrastructure.Authentication;
 
@@ -32,12 +33,14 @@ internal sealed class WebAuthnService : IWebAuthnService
     private readonly CffVaultManagerDbContext _db;
     private readonly IFido2 _fido2;
     private readonly ISecurityNotificationService? _securityNotifications;
+    private readonly ILogger<WebAuthnService>? _logger;
 
-    public WebAuthnService(CffVaultManagerDbContext db, IFido2 fido2, ISecurityNotificationService? securityNotifications = null)
+    public WebAuthnService(CffVaultManagerDbContext db, IFido2 fido2, ISecurityNotificationService? securityNotifications = null, ILogger<WebAuthnService>? logger = null)
     {
         _db = db;
         _fido2 = fido2;
         _securityNotifications = securityNotifications;
+        _logger = logger;
     }
 
     public async Task<string> BeginRegistrationAsync(Guid userId, bool enablePasswordless = false, CancellationToken ct = default)
@@ -362,6 +365,11 @@ internal sealed class WebAuthnService : IWebAuthnService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Never logged before this line was added — every passwordless-login failure surfaced
+            // to the client as an identical generic error with zero server-side diagnostic trail.
+            // The exception itself (Fido2NetLib validation failures, signature/PRF-adjacent
+            // mismatches) contains no secret material — the PRF output never reaches this class.
+            _logger?.LogWarning(ex, "Passkey passwordless login assertion verification failed for credential {CredentialId}", credential.Id);
             ceremony.ConsumedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
             return null;
