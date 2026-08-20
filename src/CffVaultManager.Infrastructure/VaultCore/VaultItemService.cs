@@ -157,6 +157,38 @@ internal sealed class VaultItemService : IVaultItemService
         return ToDto(item, tagIds, mySharedAccess);
     }
 
+    public async Task<VaultItemDto> MoveAsync(Guid vaultId, Guid itemId, Guid callerId, MoveVaultItemRequest request, CancellationToken ct = default)
+    {
+        var (sourceVault, sourcePermission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);
+        if (!sourcePermission.CanWrite()) throw new InsufficientVaultPermissionException();
+
+        var item = await _db.VaultItems.FirstOrDefaultAsync(i => i.Id == itemId && i.VaultId == vaultId, ct)
+            ?? throw new KeyNotFoundException("Item not found.");
+
+        if (item.IsDeleted)
+        {
+            throw new InvalidOperationException("Cannot move a deleted item; restore it first.");
+        }
+
+        if (request.DestinationVaultId == vaultId)
+        {
+            throw new InvalidOperationException("The destination vault must be different from the current one.");
+        }
+
+        var (destinationVault, destinationPermission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, request.DestinationVaultId, callerId, ct);
+        if (!destinationPermission.CanWrite()) throw new InsufficientVaultPermissionException();
+
+        var tags = await _db.VaultItemTags.Where(t => t.VaultItemId == itemId).ToListAsync(ct);
+        _db.VaultItemTags.RemoveRange(tags);
+
+        item.MoveTo(destinationVault.Id, request.EncryptedPayload);
+        WriteAudit(sourceVault.TenantId, callerId, AuditAction.Moved, item.Id);
+        await _db.SaveChangesAsync(ct);
+
+        var mySharedAccess = await GetMySharedAccessAsync(itemId, callerId, ct);
+        return ToDto(item, Array.Empty<Guid>(), mySharedAccess);
+    }
+
     public async Task SoftDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default)
     {
         var (vault, permission) = await VaultAccessGuard.GetAccessibleVaultAsync(_db, vaultId, callerId, ct);

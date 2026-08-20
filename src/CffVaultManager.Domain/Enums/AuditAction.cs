@@ -44,4 +44,5 @@ public enum AuditAction
     UserInvited,
     UserInvitationAccepted,
     UserInvitationRevoked,
+    Moved,
 }

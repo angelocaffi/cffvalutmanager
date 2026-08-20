@@ -907,7 +907,176 @@ public sealed class VaultMembershipTests : IDisposable
             VaultAccessGuard.GetAccessibleVaultAsync(ctx, adminPersonalVaultId, operatorId, default));
     }
 
+    // ---- VaultItemService.MoveAsync (move an item between vaults) ---------------------------
+
+    [Fact]
+    public async Task MoveAsync_relocates_the_item_updates_ciphertext_clears_folder_and_tags_and_writes_audit()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+
+        Guid itemId;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            var items = new VaultItemService(ctx);
+            var folder = await new FolderService(ctx).CreateAsync(personalVaultId, adminId, new CreateFolderRequest("F"));
+            var tag = await new TagService(ctx).CreateAsync(personalVaultId, adminId, new CreateTagRequest("T"));
+            itemId = (await items.CreateAsync(personalVaultId, adminId,
+                new CreateVaultItemRequest(VaultItemType.Password, Payload, folder.Id))).Id;
+            await items.AssignTagAsync(personalVaultId, itemId, tag.Id, adminId);
+        }
+
+        var newPayload = RandomBytes(40);
+        VaultItemDto moved;
+        using (var ctx = CreateContext(Tenant(tenantId, adminId)))
+        {
+            moved = await new VaultItemService(ctx).MoveAsync(personalVaultId, itemId, adminId,
+                new MoveVaultItemRequest(orgVault, newPayload));
+        }
+
+        Assert.Null(moved.FolderId);
+        Assert.Empty(moved.TagIds);
+        Assert.Equal(newPayload, moved.EncryptedPayload);
+
+        using var verify = CreateContext(SuperAdmin());
+        var stored = await verify.VaultItems.IgnoreQueryFilters().SingleAsync(i => i.Id == itemId);
+        Assert.Equal(orgVault, stored.VaultId);
+        Assert.Null(stored.FolderId);
+        Assert.False(await verify.VaultItemTags.IgnoreQueryFilters().AnyAsync(t => t.VaultItemId == itemId));
+        Assert.True(await verify.AuditLogEntries.IgnoreQueryFilters()
+            .AnyAsync(a => a.VaultItemId == itemId && a.Action == AuditAction.Moved));
+    }
+
+    [Fact]
+    public async Task MoveAsync_without_write_on_the_source_vault_throws_InsufficientVaultPermissionException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        var readerId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        await InviteMemberAsync(orgVault, adminId, tenantId, readerId, VaultPermission.Read);
+
+        var itemId = await CreateItemAsync(orgVault, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, readerId));
+        await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
+            new VaultItemService(ctx).MoveAsync(orgVault, itemId, readerId,
+                new MoveVaultItemRequest(personalVaultId, RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_without_write_on_the_destination_vault_throws_InsufficientVaultPermissionException()
+    {
+        // The caller needs a source vault they can write to and a destination they can only read —
+        // a personal vault can't supply the "read-only" half (it is owner-only), so both sides here
+        // are org vaults the same operator belongs to with different permissions.
+        var (tenantId, adminId, _) = await ProvisionAsync();
+        var writableVault = await CreateOrgVaultAsync(tenantId, adminId, "Writable");
+        var readOnlyVault = await CreateOrgVaultAsync(tenantId, adminId, "ReadOnly");
+        var operatorId = await RegisterUserAsync(tenantId, adminId, UniqueEmail());
+        await InviteMemberAsync(writableVault, adminId, tenantId, operatorId, VaultPermission.ReadWrite);
+        await InviteMemberAsync(readOnlyVault, adminId, tenantId, operatorId, VaultPermission.Read);
+
+        var itemId = await CreateItemAsync(writableVault, operatorId);
+
+        using var ctx = CreateContext(Tenant(tenantId, operatorId));
+        await Assert.ThrowsAsync<InsufficientVaultPermissionException>(() =>
+            new VaultItemService(ctx).MoveAsync(writableVault, itemId, operatorId,
+                new MoveVaultItemRequest(readOnlyVault, RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_into_an_inaccessible_vault_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var itemId = await CreateItemAsync(personalVaultId, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultItemService(ctx).MoveAsync(personalVaultId, itemId, adminId,
+                new MoveVaultItemRequest(Guid.NewGuid(), RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_into_a_vault_in_a_different_tenant_throws_KeyNotFoundException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var (tenant2, admin2, _) = await ProvisionAsync("beta", "admin@beta.com");
+        var foreignVault = await CreateOrgVaultAsync(tenant2, admin2, "Foreign");
+
+        var itemId = await CreateItemAsync(personalVaultId, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            new VaultItemService(ctx).MoveAsync(personalVaultId, itemId, adminId,
+                new MoveVaultItemRequest(foreignVault, RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_to_the_same_vault_throws_InvalidOperationException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var itemId = await CreateItemAsync(personalVaultId, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new VaultItemService(ctx).MoveAsync(personalVaultId, itemId, adminId,
+                new MoveVaultItemRequest(personalVaultId, RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_on_a_deleted_item_throws_InvalidOperationException()
+    {
+        var (tenantId, adminId, personalVaultId) = await ProvisionAsync();
+        var orgVault = await CreateOrgVaultAsync(tenantId, adminId, "Team");
+        var itemId = await CreateItemAsync(personalVaultId, adminId);
+
+        using var ctx = CreateContext(Tenant(tenantId, adminId));
+        var items = new VaultItemService(ctx);
+        await items.SoftDeleteAsync(personalVaultId, itemId, adminId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            items.MoveAsync(personalVaultId, itemId, adminId, new MoveVaultItemRequest(orgVault, RandomBytes(10))));
+    }
+
+    [Fact]
+    public async Task MoveAsync_leaves_an_already_shared_items_ItemMembership_untouched()
+    {
+        // An item promoted to a dedicated per-item key (see docs/features/sharing-access-control.md)
+        // must keep working for its recipient after its owner moves it to a different vault: the
+        // membership is keyed by VaultItemId, never VaultId.
+        var (tenantId, ownerId, personalVaultId) = await ProvisionAsync();
+        var orgVault = await CreateOrgVaultAsync(tenantId, ownerId, "Team");
+        var recipientId = await RegisterUserAsync(tenantId, ownerId, UniqueEmail());
+        await SetPublicKeyAsync(recipientId, PublicKeyBytes());
+
+        var itemId = await CreateItemAsync(personalVaultId, ownerId);
+        using (var ctx = CreateContext(Tenant(tenantId, ownerId)))
+        {
+            await new ItemMembershipService(ctx).ShareAsync(personalVaultId, itemId, ownerId, tenantId,
+                new ShareItemRequest(await EmailOfAsync(recipientId), ItemSharePermission.Viewer,
+                    RandomBytes(40), WrappedDek(), EphemeralKey(), WrappedDek(), EphemeralKey()));
+        }
+
+        using (var ctx = CreateContext(Tenant(tenantId, ownerId)))
+        {
+            await new VaultItemService(ctx).MoveAsync(personalVaultId, itemId, ownerId,
+                new MoveVaultItemRequest(orgVault, RandomBytes(40)));
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        var stored = await verify.VaultItems.IgnoreQueryFilters().SingleAsync(i => i.Id == itemId);
+        Assert.Equal(orgVault, stored.VaultId);
+        Assert.True(await verify.ItemMemberships.IgnoreQueryFilters()
+            .AnyAsync(m => m.VaultItemId == itemId && m.UserId == recipientId && m.RevokedAt == null));
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
+
+    private async Task<string> EmailOfAsync(Guid userId)
+    {
+        using var ctx = CreateContext(SuperAdmin());
+        return (await ctx.Users.IgnoreQueryFilters().SingleAsync(u => u.Id == userId)).Email;
+    }
 
     private CffVaultManagerDbContext CreateContext(ITenantContext tenantContext)
     {

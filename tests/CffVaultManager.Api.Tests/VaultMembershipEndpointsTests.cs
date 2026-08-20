@@ -421,6 +421,73 @@ public sealed class VaultMembershipEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, writerCreate.StatusCode);
     }
 
+    // ---- Move item between vaults -----------------------------------------------------------
+
+    [Fact]
+    public async Task POST_move_relocates_the_item_to_the_destination_vault()
+    {
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        Guid personalVaultId = await GetOwnedVaultIdAsync(adminToken);
+        Guid orgVaultId = await CreateOrgVaultAsync(adminToken, "Team");
+
+        var createResponse = await SendAuthorizedAsync(HttpMethod.Post, $"/api/vaults/{personalVaultId}/items", adminToken, new
+        {
+            Type = "Password",
+            EncryptedPayload = RandomBytes(32),
+            FolderId = (Guid?)null,
+            IsFavorite = false,
+        });
+        using var created = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        Guid itemId = created.RootElement.GetProperty("id").GetGuid();
+
+        var moveResponse = await SendAuthorizedAsync(HttpMethod.Post, $"/api/vaults/{personalVaultId}/items/{itemId}/move", adminToken, new
+        {
+            DestinationVaultId = orgVaultId,
+            EncryptedPayload = RandomBytes(32),
+        });
+        Assert.Equal(HttpStatusCode.OK, moveResponse.StatusCode);
+
+        var sourceList = await GetAuthorizedAsync($"/api/vaults/{personalVaultId}/items", adminToken);
+        using var sourceBody = JsonDocument.Parse(await sourceList.Content.ReadAsStringAsync());
+        Assert.Empty(sourceBody.RootElement.EnumerateArray());
+
+        var destinationList = await GetAuthorizedAsync($"/api/vaults/{orgVaultId}/items", adminToken);
+        using var destinationBody = JsonDocument.Parse(await destinationList.Content.ReadAsStringAsync());
+        var destinationIds = destinationBody.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetGuid()).ToList();
+        Assert.Contains(itemId, destinationIds);
+    }
+
+    [Fact]
+    public async Task POST_move_to_a_vault_without_write_access_returns_403()
+    {
+        string adminToken = await ProvisionAndLoginAsync("acme", "admin@acme.test");
+        Guid writableVault = await CreateOrgVaultAsync(adminToken, "Writable");
+        Guid readOnlyVault = await CreateOrgVaultAsync(adminToken, "ReadOnly");
+
+        var operatorAuthHash = RandomBytes(32);
+        Guid operatorId = await RegisterOperatorAsync(adminToken, "operator@acme.test", operatorAuthHash);
+        string operatorToken = await LoginAsync("operator@acme.test", operatorAuthHash);
+        Assert.Equal(HttpStatusCode.Created, (await InviteAsync(adminToken, writableVault, operatorId, "ReadWrite")).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await InviteAsync(adminToken, readOnlyVault, operatorId, "Read")).StatusCode);
+
+        var createResponse = await SendAuthorizedAsync(HttpMethod.Post, $"/api/vaults/{writableVault}/items", operatorToken, new
+        {
+            Type = "Password",
+            EncryptedPayload = RandomBytes(32),
+            FolderId = (Guid?)null,
+            IsFavorite = false,
+        });
+        using var created = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        Guid itemId = created.RootElement.GetProperty("id").GetGuid();
+
+        var moveResponse = await SendAuthorizedAsync(HttpMethod.Post, $"/api/vaults/{writableVault}/items/{itemId}/move", operatorToken, new
+        {
+            DestinationVaultId = readOnlyVault,
+            EncryptedPayload = RandomBytes(32),
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, moveResponse.StatusCode);
+    }
+
     // ---- Helpers ----------------------------------------------------------------------------
 
     private async Task<string> ProvisionAndLoginAsync(string slug, string adminEmail)

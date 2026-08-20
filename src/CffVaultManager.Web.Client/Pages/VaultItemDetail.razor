@@ -151,6 +151,45 @@ else
                 }
             </div>
         </div>
+
+        <div class="card mt-4" style="max-width: 32rem;">
+            <div class="card-body">
+                <h2 class="h5">Sposta in un altro vault</h2>
+
+                @if (_moveCandidates.Count == 0)
+                {
+                    <p class="text-body-secondary small">Nessun altro vault disponibile.</p>
+                }
+                else
+                {
+                    @if (_folderId is not null || _tagCount > 0)
+                    {
+                        <p class="text-body-secondary small">La cartella e i tag verranno rimossi: il vault di destinazione non li conosce.</p>
+                    }
+                    <div class="mb-2">
+                        <label class="form-label">Vault di destinazione</label>
+                        <select class="form-select" @bind="_moveDestinationVaultId" disabled="@_moveBusy">
+                            @foreach (var v in _moveCandidates)
+                            {
+                                <option value="@v.Id">@v.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_moveBusy" @onclick="MoveAsync">
+                        @if (_moveBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Sposta
+                    </button>
+                }
+
+                @if (_moveError is not null)
+                {
+                    <div class="alert alert-danger py-2 mt-2" role="alert">@_moveError</div>
+                }
+            </div>
+        </div>
     }
 }
 
@@ -195,6 +234,14 @@ else
     private string? _shareError;
     private string? _shareSuccess;
 
+    // ---- Move to another vault ----------------------------------------------------------------
+    private int _tagCount;
+    private byte[]? _currentEncryptedPayload;
+    private IReadOnlyList<VaultResponse> _moveCandidates = [];
+    private Guid _moveDestinationVaultId;
+    private bool _moveBusy;
+    private string? _moveError;
+
     protected override async Task OnParametersSetAsync()
     {
         _errorMessage = null;
@@ -222,13 +269,21 @@ else
                 _effectiveType = item.Type;
                 _isFavorite = item.IsFavorite;
                 _folderId = item.FolderId;
+                _tagCount = item.TagIds.Count;
                 _mySharedAccess = item.MySharedAccess;
+                _currentEncryptedPayload = item.EncryptedPayload;
                 await DecryptIntoAsync(item);
 
                 if (_mySharedAccess is not null)
                 {
                     _members = await ItemSharingApi.ListMembersAsync(id);
                     _ownerId = _members.FirstOrDefault(m => m.Permission == "Owner")?.UserId ?? Guid.Empty;
+                }
+
+                _moveCandidates = (await VaultApi.ListVaultsAsync()).Where(v => v.Id != VaultId).ToList();
+                if (_moveCandidates.Count > 0)
+                {
+                    _moveDestinationVaultId = _moveCandidates[0].Id;
                 }
             }
             else
@@ -237,8 +292,11 @@ else
                 _effectiveType = Type ?? VaultItemTypes.Password;
                 _isFavorite = false;
                 _folderId = null;
+                _tagCount = 0;
                 _mySharedAccess = null;
                 _members = [];
+                _currentEncryptedPayload = null;
+                _moveCandidates = [];
                 _passwordModel = new PasswordFormModel();
                 _creditCardModel = new CreditCardFormModel();
                 _cryptoWalletModel = new CryptoWalletFormModel();
@@ -503,6 +561,50 @@ else
         finally
         {
             _shareBusy = false;
+        }
+    }
+
+    private async Task MoveAsync()
+    {
+        if (ItemId is not { } itemId || _currentEncryptedPayload is null)
+        {
+            return;
+        }
+
+        _moveError = null;
+        _moveBusy = true;
+        try
+        {
+            byte[] payloadForDestination;
+            if (_mySharedAccess is not null)
+            {
+                // Already promoted to a dedicated per-item key, independent of the vault it lives
+                // in — the ciphertext travels unchanged (see docs/features/vault-core.md
+                // "Spostamento tra vault").
+                payloadForDestination = _currentEncryptedPayload;
+            }
+            else
+            {
+                byte[] sourceDek = (await VaultDekResolver.ResolveAsync(VaultId)).Dek;
+                var blob = EncryptedBlob.FromBytes(_currentEncryptedPayload);
+                byte[] plaintext = AeadCipher.Decrypt(blob, sourceDek);
+
+                byte[] destinationDek = (await VaultDekResolver.ResolveAsync(_moveDestinationVaultId)).Dek;
+                payloadForDestination = AeadCipher.Encrypt(plaintext, destinationDek).ToBytes();
+            }
+
+            var (success, _, error) = await VaultApi.MoveItemAsync(VaultId, itemId, _moveDestinationVaultId, payloadForDestination);
+            if (!success)
+            {
+                _moveError = error;
+                return;
+            }
+
+            Navigation.NavigateTo($"/vault/{_moveDestinationVaultId}/items/{itemId}");
+        }
+        finally
+        {
+            _moveBusy = false;
         }
     }
 

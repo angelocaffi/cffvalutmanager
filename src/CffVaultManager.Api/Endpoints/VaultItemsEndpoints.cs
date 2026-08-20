@@ -60,6 +60,10 @@ internal static class VaultItemsEndpoints
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
                 Results.Ok(await service.UpdateAsync(vaultId, itemId, tenantContext.UserId!.Value, request, ct))));
 
+        group.MapPost("/{itemId:guid}/move", (Guid vaultId, Guid itemId, MoveVaultItemRequest request, IVaultItemService service, ITenantContext tenantContext, CancellationToken ct) =>
+            VaultCoreEndpointHelpers.ExecuteAsync(async () =>
+                Results.Ok(await service.MoveAsync(vaultId, itemId, tenantContext.UserId!.Value, request, ct))));
+
         group.MapDelete("/{itemId:guid}", (Guid vaultId, Guid itemId, IVaultItemService service, ITenantContext tenantContext, CancellationToken ct) =>
             VaultCoreEndpointHelpers.ExecuteAsync(async () =>
             {

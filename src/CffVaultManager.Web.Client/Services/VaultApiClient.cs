@@ -118,6 +118,22 @@ public sealed class VaultApiClient
         return (true, await response.ReadJsonOrDefaultAsync<VaultItemResponse>(ct), null);
     }
 
+    public async Task<(bool Success, VaultItemResponse? Item, string? Error)> MoveItemAsync(
+        Guid vaultId, Guid itemId, Guid destinationVaultId, byte[] encryptedPayload, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync(
+            $"/api/vaults/{vaultId}/items/{itemId}/move",
+            new { DestinationVaultId = destinationVaultId, EncryptedPayload = encryptedPayload },
+            ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return (false, null, await response.ReadErrorOrAsync("Impossibile spostare la voce.", ct));
+        }
+
+        return (true, await response.ReadJsonOrDefaultAsync<VaultItemResponse>(ct), null);
+    }
+
     public async Task<bool> DeleteItemAsync(Guid vaultId, Guid itemId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/api/vaults/{vaultId}/items/{itemId}", ct)).IsSuccessStatusCode;
 

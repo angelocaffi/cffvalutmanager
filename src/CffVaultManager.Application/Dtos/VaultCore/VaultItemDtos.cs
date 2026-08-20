@@ -41,6 +41,14 @@ public sealed record UpdateVaultItemRequest(
     Guid? FolderId,
     bool IsFavorite);
 
+/// <summary>
+/// Moves an item to a different vault. <see cref="EncryptedPayload"/> is the item re-encrypted for
+/// the destination (client-side): unchanged if the item is already promoted to a dedicated per-item
+/// key (see <see cref="VaultItemDto.MySharedAccess"/>), otherwise re-wrapped with the destination
+/// vault's DEK. The server stores it verbatim either way.
+/// </summary>
+public sealed record MoveVaultItemRequest(Guid DestinationVaultId, byte[] EncryptedPayload);
+
 public enum VaultItemSortBy
 {
     CreatedAt,

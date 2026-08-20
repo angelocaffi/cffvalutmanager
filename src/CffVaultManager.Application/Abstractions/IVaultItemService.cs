@@ -20,6 +20,13 @@ public interface IVaultItemService
 
     Task<VaultItemDto> UpdateAsync(Guid vaultId, Guid itemId, Guid callerId, UpdateVaultItemRequest request, CancellationToken ct = default);
 
+    /// <summary>
+    /// Moves an item to a different vault the caller can also write to (same tenant, enforced
+    /// server-side). Clears its folder and tag assignments — both are scoped to the source vault.
+    /// Leaves any <c>ItemMembership</c>/<c>ExternalShareLink</c> untouched.
+    /// </summary>
+    Task<VaultItemDto> MoveAsync(Guid vaultId, Guid itemId, Guid callerId, MoveVaultItemRequest request, CancellationToken ct = default);
+
     Task SoftDeleteAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default);
 
     Task RestoreAsync(Guid vaultId, Guid itemId, Guid callerId, CancellationToken ct = default);

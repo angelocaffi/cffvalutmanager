@@ -100,4 +100,19 @@ public class VaultItem
         IsDeleted = false;
         DeletedAt = null;
     }
+
+    /// <summary>
+    /// Moves the item to a different vault, replacing its ciphertext with the caller-provided
+    /// re-encryption (see docs/features/vault-core.md "Spostamento tra vault"). Clears
+    /// <see cref="FolderId"/>: folders are vault-scoped, so one from the source vault is never
+    /// valid in the destination. Caller-side <c>ItemMembership</c>/<c>ExternalShareLink</c> rows are
+    /// untouched — both are already independent of <see cref="VaultId"/> by design.
+    /// </summary>
+    public void MoveTo(Guid destinationVaultId, byte[] encryptedPayload)
+    {
+        VaultId = Guard.AgainstEmptyGuid(destinationVaultId);
+        EncryptedPayload = Guard.AgainstNullOrEmpty(encryptedPayload);
+        FolderId = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 }
