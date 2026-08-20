@@ -11,6 +11,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
 
+// ForwardedHeaders below fixed HSTS (verified live) but not this: the antiforgery cookie's
+// SecurePolicy default turned out not to follow Request.IsHttps here, so it still needs an
+// explicit override — see docs/pentest-report-2026-08-20.md finding #5.
+builder.Services.AddAntiforgery(options => options.Cookie.SecurePolicy = CookieSecurePolicy.Always);
+
 // Same trusted-proxy configuration as CffVaultManager.Api's Program.cs, and for the same reason:
 // without it, this host never learns a request arrived over HTTPS (Caddy terminates TLS and
 // forwards plain HTTP within the Docker network) — which silently neutered both UseHsts() below
