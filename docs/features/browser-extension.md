@@ -1,6 +1,8 @@
 # Estensione browser
 
-> Stato: backlog, non ancora pianificata in dettaglio (nessun design di sicurezza approvato, nessun codice).
+> Stato: design di sicurezza approvato per lo scope v1 (2026-08-20) — vedi
+> [security-model.md](../security-model.md#estensione-browser-chromeedge-manifest-v3--v1-solo-cattura).
+> In implementazione. Nessuna decisione presa su v2 (autofill).
 
 ## Scopo
 
@@ -20,17 +22,14 @@ Deliberatamente ridotto rispetto a un password manager con estensione completa:
 - Conferma esplicita prima di ogni scrittura nel vault (mai un salvataggio silenzioso) — coerente con l'assenza generale di automatismi impliciti nel resto del progetto.
 - Badge/icona con stato (bloccato/sbloccato) coerente con l'auto-lock già presente nell'app web (`Session.Lock`).
 
-## Requisiti di sicurezza (da approfondire prima di qualunque codice — CLAUDE.md principio 5)
+## Requisiti di sicurezza — decisi (vedi [security-model.md](../security-model.md#estensione-browser-chromeedge-manifest-v3--v1-solo-cattura) per il dettaglio completo)
 
-Punti aperti che vanno risolti in `security-model.md` (nuova sezione dedicata) **prima** di iniziare l'implementazione, non durante:
-
-- **Autenticazione**: l'estensione è un nuovo client verso la stessa Api (`/api/auth/*`) — nessun endpoint nuovo previsto per l'auth in sé, ma va deciso dove/come vive il refresh token nel contesto di un'estensione (storage dell'estensione vs `background service worker` in memoria) e se condividere la sessione con una scheda dell'app web già loggata o richiedere un login indipendente.
-- **DEK in memoria nell'estensione**: stesso principio zero-knowledge del resto del progetto (la DEK sblocca solo client-side, mai persistita) — ma il "client-side" qui è un service worker di estensione con un ciclo di vita diverso da una tab (può essere terminato e riavviato da Chrome in qualunque momento). Va deciso se questo equivale a un lock automatico immediato (nessuna DEK sopravvive a un riavvio del service worker, quindi nessun problema nuovo) o se serve un meccanismo di persistenza dedicato — la seconda opzione, se mai scelta, avrebbe implicazioni di sicurezza serie e andrebbe motivata esplicitamente.
-- **Isolamento del content script**: un content script gira nel contesto della pagina visitata — va garantito che non possa mai leggere/esfiltrare la DEK o il token di sessione dal contesto del background/popup dell'estensione (comunicazione solo tramite i canali sandboxed standard di Chrome, `chrome.runtime.sendMessage`, mai variabili globali condivise).
-- **CORS/CSP lato Api**: l'estensione chiamerà l'Api da un'origine `chrome-extension://<id>` — va verificato se serve un'eccezione CORS dedicata (l'Api oggi assume client same-origin/dominio noto, vedi `docs/deployment.md`) e se questo introduce un vettore nuovo da considerare nella checklist di sicurezza.
-- **Permessi manifest**: Manifest V3 richiede dichiarare esplicitamente su quali siti il content script gira — va deciso se `<all_urls>` (semplice ma permesso ampio, revisione Chrome Web Store più severa) o un meccanismo di attivazione più mirato.
-
-Nessuna di queste decisioni è presa: vanno risolte in un piano dedicato (stesso processo già seguito per WebAuthn PRF passwordless, vedi [authentication.md](authentication.md)) prima di scrivere codice.
+- **Autenticazione**: login indipendente nel popup (stesso flusso a due passi di `Login.razor`), nessuna condivisione di sessione con una tab web già loggata in v1 (backlog v2 esplicito).
+- **DEK in memoria nell'estensione**: mai persistita — vive solo per la durata dell'episodio di veglia del service worker, si azzera a ogni sua terminazione (~30s di inattività). Nessun meccanismo di persistenza dedicato introdotto.
+- **Crittografia**: nessuna seconda implementazione JS/WASM — un documento offscreen (`chrome.offscreen`) ospita un host Blazor WASM minimale che riferisce `CffVaultManager.Crypto` direttamente, esposto al service worker via `[JSInvokable]`.
+- **Isolamento del content script**: isolated world standard di Chrome, comunicazione solo via `chrome.runtime.sendMessage`, nessun listener su `input`/`keydown` — solo submit esplicito.
+- **CORS lato Api**: `chrome-extension://<id-pinnato>` aggiunto a `Cors:AllowedOrigins`; id pinnato con una chiave pubblica fissa in `manifest.json` per restare stabile tra caricamento non pacchettizzato e pubblicazione.
+- **Permessi manifest**: `content_scripts` su `<all_urls>` (necessario, sito di login non prevedibile) ma script stesso ridotto al minimo; nessun permesso host più ampio richiesto per v1.
 
 ## UX essenziale (proposta)
 

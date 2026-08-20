@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>CffVault crypto host</title>
+    <base href="/" />
+</head>
+<body>
+    <!--
+        No UI on purpose: this page's only job is to boot the WASM runtime so
+        CryptoInterop's [JSInvokable] static methods become callable from the extension's
+        background service worker (see docs/security-model.md "Estensione browser"). Loaded as the
+        extension's offscreen document, never shown to the user.
+    -->
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+</html>

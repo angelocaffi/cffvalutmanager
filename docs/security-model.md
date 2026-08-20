@@ -110,6 +110,65 @@ Ogni passkey/dispositivo ha il proprio secret d'authenticator, quindi il proprio
 
 L'estensione PRF non è disponibile ovunque (buon supporto su Chrome/Android con Google Password Manager al momento della scrittura; supporto variabile altrove). La UI deve degradare in modo pulito al form email/master password quando non disponibile — mai un errore bloccante.
 
+## Estensione browser (Chrome/Edge, Manifest V3) — v1: solo cattura
+
+Design approvato (vedi [features/browser-extension.md](features/browser-extension.md) per scope e
+UX): l'estensione osserva un submit di login riuscito su una pagina qualunque e propone di salvare
+username/password/dominio come una normale voce `Password`, con conferma esplicita dell'utente —
+mai un salvataggio silenzioso, mai autofill (backlog v2 esplicito, superficie di attacco molto più
+ampia e non ancora progettata). Due decisioni chiudono i punti aperti lasciati dal documento di
+scope.
+
+### Sessione e DEK: mai persistite, login indipendente dall'app web
+
+Un service worker Manifest V3 (il "background" dell'estensione) viene terminato da Chrome dopo
+~30 secondi di inattività, azzerando ogni stato in memoria — molto più aggressivo del "solo un vero
+reload di pagina" che oggi fa perdere la sessione nell'app web (vedi `SessionState`,
+`TokenRefreshScheduler`). Applicare *lo stesso* principio ("mai persistita su disco") invece di
+introdurre una persistenza nuova per compensare: l'utente sblocca l'estensione dal popup con
+email + master password — stesso flusso a due passi di `Login.razor`
+(`/api/auth/prelogin` → deriva `AuthHash` client-side → `/api/auth/login`), nessun endpoint nuovo —
+e la DEK/i token vivono solo in variabili di modulo del service worker per la durata dell'episodio
+di veglia corrente. Ogni terminazione richiede un nuovo unlock; nessun uso di `chrome.storage` per
+token o DEK (sopravviverebbe a un riavvio del service worker, vanificando lo scopo). **v1 non
+condivide la sessione con una tab web già sbloccata** — un ponte cross-context tra pagina e
+service worker è una superficie di sicurezza a sé, rimandata a un domani con progettazione dedicata,
+non necessaria per il capture-only di v1.
+
+### Crittografia: un documento offscreen, non una seconda implementazione
+
+Il service worker/popup girano in puro JavaScript — non possono eseguire
+`CffVaultManager.Crypto` (BouncyCastle via .NET/Blazor WASM) direttamente. Invece di scrivere una
+seconda implementazione crittografica in JS/WASM (rischio di divergenza silenziosa da quella già
+verificata, es. parametri Argon2id o formato `EncryptedBlob` che driftano tra le due codebase),
+l'estensione ospita un **documento offscreen** (`chrome.offscreen`, Manifest V3 — una pagina HTML
+nascosta con un vero DOM) che carica un host Blazor WASM minimale, riferendo solo
+`CffVaultManager.Crypto`. Espone via `[JSInvokable]` le stesse primitive già in uso da `Web.Client`
+(derivazione Argon2id, AES-256-GCM su `EncryptedBlob`, unwrap X25519 per un vault di organizzazione)
+— una sola implementazione crittografica in tutto il progetto. Il documento offscreen riceve solo
+byte opachi/la master password in chiaro per la singola derivazione richiesta, non accumula stato
+oltre la chiamata corrente — stesso principio zero-knowledge del resto del progetto.
+
+### Isolamento content script
+
+Il content script che rileva il submit di un form gira nell'"isolated world" standard di Chrome
+(heap JavaScript separato da quello della pagina ospite, stesso DOM) — non condivide mai variabili
+globali con la pagina. Comunica con il background **solo** tramite `chrome.runtime.sendMessage`
+(mai un canale globale condiviso). Nessuna lettura di campi di pagina al di fuori di un submit
+esplicito dell'utente — niente listener su `input`/`keydown`, che aprirebbe la porta a un
+keylogging involontario.
+
+### CORS e permessi manifest
+
+L'estensione chiama l'Api da un'origine `chrome-extension://<id>` — va aggiunta a
+`Cors:AllowedOrigins` (oggi solo `https://{PUBLIC_DOMAIN}`, vedi `Program.cs`/`docker-compose.yml`).
+L'id dell'estensione va **pinnato** con una chiave pubblica fissa in `manifest.json` (`"key"`), così
+resta stabile tra caricamento non pacchettizzato e pubblicazione — altrimenti cambierebbe a ogni
+reinstallazione e romperebbe la configurazione CORS. Permessi: `content_scripts` con
+`matches: ["<all_urls>"]` (necessario — non si sa in anticipo su quale sito l'utente farà login) ma
+lo script stesso resta deliberatamente minimo (solo il listener di submit sopra); nessun permesso
+host più ampio (`tabs`, `webRequest`) richiesto per lo scope v1.
+
 ## Logging e osservabilità
 
 - **Divieto assoluto**: loggare password, numeri di carta, CVV, contenuto di secrets o master password, in qualunque forma (anche mascherata parzialmente, salvo ultime 4 cifre carte dove esplicitamente richiesto dalla UX).

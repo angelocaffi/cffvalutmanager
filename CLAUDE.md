@@ -39,6 +39,7 @@ src/
   CffVaultManager.Domain        -> entità di dominio, interfacce
   CffVaultManager.Infrastructure -> EF Core (PostgreSQL), repository tenant-aware
   CffVaultManager.Crypto        -> derivazione chiavi e cifratura, compatibile WASM
+  CffVaultManager.Extension.CryptoHost -> host Blazor WASM senza UI, documento offscreen dell'estensione browser
 tests/
   CffVaultManager.Crypto.Tests
   CffVaultManager.Application.Tests
@@ -46,7 +47,7 @@ tests/
   CffVaultManager.Api.Tests            -> autenticazione/autorizzazione end-to-end via WebApplicationFactory
 ```
 
-Riferimenti tra progetti: `Application → Domain`, `Infrastructure → Domain, Application`, `Api → Application, Infrastructure, Domain`, `Web.Client → Crypto`, `Web → Web.Client`.
+Riferimenti tra progetti: `Application → Domain`, `Infrastructure → Domain, Application`, `Api → Application, Infrastructure, Domain`, `Web.Client → Crypto`, `Web → Web.Client`, `Extension.CryptoHost → Crypto`.
 
 ## Convenzioni di lavoro
 
