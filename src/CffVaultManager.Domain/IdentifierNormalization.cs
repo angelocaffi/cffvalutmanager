@@ -10,7 +10,11 @@ namespace CffVaultManager.Domain;
 /// </summary>
 public static class IdentifierNormalization
 {
-    public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+    // Nullable input, never throws: a malformed/missing field on a public unauthenticated endpoint
+    // (e.g. POST /api/auth/prelogin with no Email) must fall through as "no match", not crash with
+    // a NullReferenceException from inside an EF Core LINQ predicate (see docs/pentest-report-
+    // 2026-08-20.md, finding #3) — null normalizes to "", which matches no real Email/Slug.
+    public static string NormalizeEmail(string? email) => email?.Trim().ToLowerInvariant() ?? string.Empty;
 
-    public static string NormalizeSlug(string slug) => slug.Trim().ToLowerInvariant();
+    public static string NormalizeSlug(string? slug) => slug?.Trim().ToLowerInvariant() ?? string.Empty;
 }

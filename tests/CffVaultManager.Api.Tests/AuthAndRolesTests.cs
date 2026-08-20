@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.WebUtilities;
 using OtpNet;
 
@@ -254,6 +255,34 @@ public sealed class AuthAndRolesTests : IAsyncLifetime
     {
         var response = await _client.GetAsync("/api/auth/me");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task POST_tenants_in_Production_without_a_SuperAdmin_caller_returns_403()
+    {
+        // Regression test for docs/pentest-report-2026-08-20.md finding #1: this direct,
+        // no-email-verification endpoint used to be reachable by anyone in any environment —
+        // now it requires an authenticated SuperAdmin caller once the host runs as Production
+        // (the test suite itself keeps using it unauthenticated, since WebApplicationFactory hosts
+        // default to "Development").
+        using var productionClient = _factory
+            .WithWebHostBuilder(builder => builder.UseEnvironment("Production"))
+            .CreateClient();
+
+        var response = await productionClient.PostAsJsonAsync("/api/tenants", new
+        {
+            TenantName = "acme-prod-gate",
+            TenantSlug = "acme-prod-gate",
+            AdminEmail = "admin@acme-prod-gate.test",
+            AuthHash = RandomBytes(32),
+            EncryptedDek = RandomBytes(4),
+            MasterPasswordSalt = RandomBytes(16),
+            KdfMemoryKb = 65536,
+            KdfIterations = 3,
+            KdfVersion = 1,
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     // ---- Helpers ----------------------------------------------------------------------------

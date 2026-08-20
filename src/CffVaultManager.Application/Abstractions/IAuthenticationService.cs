@@ -17,7 +17,7 @@ public interface IAuthenticationService
     /// values on every call, for this process's lifetime) response rather than an error, so this
     /// endpoint cannot be used to enumerate registered addresses.
     /// </summary>
-    Task<PreloginResult> PreloginAsync(string email, CancellationToken ct = default);
+    Task<PreloginResult> PreloginAsync(string? email, CancellationToken ct = default);
 
     /// <summary>
     /// Verifies the auth hash for <paramref name="email"/>. On success with MFA disabled, returns a

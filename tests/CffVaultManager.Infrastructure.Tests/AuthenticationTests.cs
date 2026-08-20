@@ -183,6 +183,19 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task PreloginAsync_with_a_null_email_returns_the_fake_salt_instead_of_throwing()
+    {
+        // Regression test for docs/pentest-report-2026-08-20.md finding #3: a null Email (e.g. an
+        // unauthenticated caller posting `{}` to POST /api/auth/prelogin) used to throw a
+        // NullReferenceException from inside IdentifierNormalization.NormalizeEmail, surfacing as
+        // an unhandled 500 instead of the same anti-enumeration response as any other unknown email.
+        using var ctx = CreateContext(Unresolved());
+        var result = await CreateAuthService(ctx).PreloginAsync(null!);
+
+        Assert.NotNull(result.MasterPasswordSalt);
+    }
+
+    [Fact]
     public async Task Login_with_correct_credentials_without_mfa_succeeds_with_crypto_materials()
     {
         var authHash = RandomAuthHash();
@@ -1449,6 +1462,28 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
+    public async Task Provisioning_still_succeeds_when_the_best_effort_verification_email_throws()
+    {
+        // Regression test for docs/pentest-report-2026-08-20.md finding #3: a real production
+        // failure (SmtpCommandException for an undeliverable AdminEmail domain) used to bubble up
+        // as an unhandled exception, surfacing to the caller as a 500 despite the tenant/admin/vault
+        // having already committed successfully.
+        Guid tenantId, adminId;
+        using (var ctx = CreateContext(Unresolved()))
+        {
+            var emailVerification = new EmailVerificationService(ctx, new ThrowingEmailSender());
+            var result = await new ProvisionTenantService(ctx, _authHashHasher, emailVerification)
+                .ProvisionAsync(NewProvisionRequest(RandomAuthHash()));
+            tenantId = result.TenantId;
+            adminId = result.AdminUserId;
+        }
+
+        using var verify = CreateContext(SuperAdmin());
+        Assert.True(await verify.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Id == tenantId));
+        Assert.True(await verify.Users.IgnoreQueryFilters().AnyAsync(u => u.Id == adminId));
+    }
+
+    [Fact]
     public async Task ConfirmAsync_with_wrong_code_returns_false_and_does_not_verify()
     {
         var sender = new FakeEmailSender();
@@ -1914,5 +1949,12 @@ public sealed class AuthenticationTests : IDisposable
             SendCount++;
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>Stands in for a real SMTP failure (e.g. an undeliverable recipient domain).</summary>
+    private sealed class ThrowingEmailSender : IEmailSender
+    {
+        public Task SendAsync(string toEmail, string subject, string body, CancellationToken ct = default) =>
+            throw new InvalidOperationException("Simulated SMTP failure.");
     }
 }

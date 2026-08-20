@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using CffVaultManager.Application.Abstractions;
 using CffVaultManager.Application.Dtos.Authentication;
 using CffVaultManager.Domain.Enums;
@@ -17,14 +18,23 @@ internal static class AuthEndpoints
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         // Direct tenant provisioning: creates the organization and its first Admin in one call, no
-        // email-verification gate. Public by design (see
-        // docs/multi-tenancy.md#provisioning-di-un-nuovo-tenant) — the caller is not yet a member
-        // of any tenant, so there is nothing to authorize against. Kept for direct/assisted
-        // provisioning (e.g. a SuperAdmin onboarding a customer) and as the bootstrap primitive used
-        // throughout the test suite. The public self-service signup flow (Register.razor) no longer
-        // calls this directly — it goes through the gated pair below instead.
-        app.MapPost("/api/tenants", async (ProvisionTenantRequest request, IProvisionTenantService service, CancellationToken ct) =>
+        // email-verification gate. Kept for direct/assisted provisioning (a SuperAdmin onboarding a
+        // customer) and as the bootstrap primitive used throughout the test suite — the public
+        // self-service signup flow (Register.razor) no longer calls this directly, it goes through
+        // the gated pair below instead. In Production this now REQUIRES an authenticated SuperAdmin
+        // caller (see docs/pentest-report-2026-08-20.md, finding #1): left fully open before, it let
+        // anyone bypass the email-verification gate the pair below exists to enforce. Left anonymous
+        // outside Production so the test suite (which provisions tenants directly, with no user yet
+        // to authenticate as) keeps working unchanged — WebApplicationFactory hosts run as
+        // "Development" by default.
+        app.MapPost("/api/tenants", async (ProvisionTenantRequest request, IProvisionTenantService service, IHostEnvironment env, HttpContext http, CancellationToken ct) =>
         {
+            if (env.IsProduction() &&
+                (http.User.Identity?.IsAuthenticated != true || http.User.FindFirstValue(ClaimTypes.Role) != nameof(UserRole.SuperAdmin)))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             try
             {
                 var result = await service.ProvisionAsync(request, ct);

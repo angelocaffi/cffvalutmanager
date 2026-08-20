@@ -5,6 +5,7 @@ using CffVaultManager.Domain.Entities;
 using CffVaultManager.Domain.Enums;
 using CffVaultManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CffVaultManager.Infrastructure.Authentication;
 
@@ -18,15 +19,21 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
     private readonly CffVaultManagerDbContext _db;
     private readonly IAuthHashHasher _authHashHasher;
     private readonly IEmailVerificationService? _emailVerification;
+    private readonly ILogger<ProvisionTenantService>? _logger;
 
     // emailVerification is optional so DI resolves it to the real service in production; tests
     // that don't care about email verification can omit it entirely (mirrors the
     // Argon2Parameters? convenience default on ServerAuthHashHasher).
-    public ProvisionTenantService(CffVaultManagerDbContext db, IAuthHashHasher authHashHasher, IEmailVerificationService? emailVerification = null)
+    public ProvisionTenantService(
+        CffVaultManagerDbContext db,
+        IAuthHashHasher authHashHasher,
+        IEmailVerificationService? emailVerification = null,
+        ILogger<ProvisionTenantService>? logger = null)
     {
         _db = db;
         _authHashHasher = authHashHasher;
         _emailVerification = emailVerification;
+        _logger = logger;
     }
 
     public async Task<ProvisionTenantResult> ProvisionAsync(ProvisionTenantRequest request, CancellationToken ct = default)
@@ -121,10 +128,21 @@ internal sealed class ProvisionTenantService : IProvisionTenantService
         // Best-effort, after the tenant/admin are durably committed — see docs/features/
         // authentication.md "Verifica email in registrazione". Skipped when the caller already
         // proved ownership of AdminEmail (the gated self-service flow) — admin.EmailVerifiedAt
-        // was already set above.
+        // was already set above. Genuinely best-effort: a failure here (e.g. the AdminEmail's
+        // domain rejects mail) must not surface as a 500 to the caller — the tenant/admin/vault
+        // already committed successfully above, and are real regardless of whether this email goes
+        // out (see docs/pentest-report-2026-08-20.md, finding #3, where this previously bubbled up
+        // as an unhandled exception on every provisioning attempt with an undeliverable address).
         if (!request.EmailAlreadyVerified && _emailVerification is not null)
         {
-            await _emailVerification.RequestAsync(adminId, ip: null, userAgent: null, ct);
+            try
+            {
+                await _emailVerification.RequestAsync(adminId, ip: null, userAgent: null, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogWarning(ex, "Best-effort verification email failed after provisioning tenant {TenantId}; the tenant/admin were still created successfully.", tenantId);
+            }
         }
 
         return new ProvisionTenantResult(tenantId, adminId);

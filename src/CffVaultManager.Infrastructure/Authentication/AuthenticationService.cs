@@ -94,12 +94,17 @@ internal sealed class AuthenticationService : IAuthenticationService
         }
     }
 
-    public async Task<PreloginResult> PreloginAsync(string email, CancellationToken ct = default)
+    public async Task<PreloginResult> PreloginAsync(string? email, CancellationToken ct = default)
     {
+        // Normalized once up front: a null/missing Email on this unauthenticated public endpoint
+        // must fall through as "unknown email" below, never throw (see docs/pentest-report-
+        // 2026-08-20.md finding #3).
+        string normalizedEmail = IdentifierNormalization.NormalizeEmail(email);
+
         // The tenant is not known before authentication — same legitimate bypass as LoginAsync.
         var user = await _db.Users
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Email == IdentifierNormalization.NormalizeEmail(email), ct);
+            .FirstOrDefaultAsync(u => u.Email == normalizedEmail, ct);
 
         if (user?.MasterPasswordSalt is null || user.KdfMemoryKb is null || user.KdfIterations is null || user.KdfVersion is null)
         {
@@ -109,7 +114,7 @@ internal sealed class AuthenticationService : IAuthenticationService
             // changes between requests), and an error/empty response would leak non-existence
             // outright. Default (production) KDF parameters keep the shape identical to a real
             // response.
-            byte[] fakeSalt = HMACSHA256.HashData(GetOrCreatePreloginPepper(), Encoding.UTF8.GetBytes(email))[..16];
+            byte[] fakeSalt = HMACSHA256.HashData(GetOrCreatePreloginPepper(), Encoding.UTF8.GetBytes(normalizedEmail))[..16];
             var defaults = Argon2Parameters.Default;
             return new PreloginResult(fakeSalt, defaults.MemoryKb, defaults.Iterations, defaults.Version);
         }
