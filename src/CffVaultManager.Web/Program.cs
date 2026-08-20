@@ -1,13 +1,30 @@
+using System.Net;
 using CffVaultManager.Web;
 using CffVaultManager.Web.Components;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
+
+// Same trusted-proxy configuration as CffVaultManager.Api's Program.cs, and for the same reason:
+// without it, this host never learns a request arrived over HTTPS (Caddy terminates TLS and
+// forwards plain HTTP within the Docker network) — which silently neutered both UseHsts() below
+// and the antiforgery cookie's default Secure policy (SameAsRequest sees "not HTTPS" and omits
+// the flag). See docs/pentest-report-2026-08-20.md, findings #4/#5.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+    foreach (string proxy in builder.Configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>() ?? [])
+    {
+        options.KnownProxies.Add(IPAddress.Parse(proxy));
+    }
+});
 
 // This host never has a real server-side session to check (no cookie, nothing — the JWT and
 // unwrapped DEK live only in the WASM client's memory, see docs/security-model.md). But ASP.NET
@@ -28,6 +45,10 @@ builder.Services
 builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, PassthroughAuthorizationMiddlewareResultHandler>();
 
 var app = builder.Build();
+
+// Must run before anything that inspects the scheme (UseHsts below, the antiforgery cookie's
+// Secure policy) — same ordering requirement as CffVaultManager.Api's Program.cs.
+app.UseForwardedHeaders();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

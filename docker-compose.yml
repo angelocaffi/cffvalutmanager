@@ -87,6 +87,9 @@ services:
       - api
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # Same reasoning as api's ReverseProxy__KnownProxies__0 above — without it this host never
+      # learns a request arrived over HTTPS (see docs/pentest-report-2026-08-20.md, findings #4/#5).
+      ReverseProxy__KnownProxies__0: 172.28.0.10
     ports:
       # Same caveat as api's 8080 above: local-testing convenience, not meant to be open externally.
       - "8081:8080"

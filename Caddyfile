@@ -3,6 +3,19 @@
 }
 
 {$PUBLIC_DOMAIN} {
+	# HSTS is set by each .NET app itself (UseHsts(), now scheme-aware via ForwardedHeaders — see
+	# docs/pentest-report-2026-08-20.md findings #4/#5), not duplicated here. These two are safe,
+	# zero-compatibility-risk headers with no equivalent already set anywhere in the stack.
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Report-Only for now, deliberately: 'unsafe-inline'/'wasm-unsafe-eval' are needed for the
+		# theme-detection inline script and Blazor WASM itself (App.razor), and PayPal's JS SDK is
+		# loaded dynamically (paypal-buttons.js) — verifying this doesn't break the real checkout
+		# flow needs a live browser check before ever switching to an enforced policy. See
+		# docs/pentest-report-2026-08-20.md finding #4.
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.paypal.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.paypalobjects.com; connect-src 'self' https://www.paypal.com; frame-src https://www.paypal.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+	}
 	handle /api/* {
 		reverse_proxy api:8080
 	}
