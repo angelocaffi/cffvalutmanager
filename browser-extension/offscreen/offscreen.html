@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8" />
+    <title>CffVault crypto host</title>
+    <base href="./" />
+</head>
+<body>
+    <!--
+        Nessuna UI: documento offscreen (chrome.offscreen) che ospita il runtime Blazor WASM di
+        CffVaultManager.Extension.CryptoHost. autostart="false" perché offscreen-bridge.js deve
+        sapere con certezza quando Blazor.start() è completato prima di rispondere ai messaggi del
+        background — vedi docs/security-model.md "Estensione browser".
+
+        _framework/ NON è committato: generato da browser-extension/build.ps1 (dotnet publish del
+        progetto CryptoHost) — eseguirlo prima di caricare l'estensione come non pacchettizzata.
+    -->
+    <script src="_framework/blazor.webassembly.js" autostart="false"></script>
+    <script src="offscreen-bridge.js"></script>
+</body>
+</html>

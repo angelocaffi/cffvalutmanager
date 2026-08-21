@@ -3,6 +3,11 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+# Estensione browser: asset Blazor WASM generati da browser-extension/build.ps1 (dotnet publish
+# di CffVaultManager.Extension.CryptoHost), non sorgente — vedi browser-extension/build.ps1.
+browser-extension/.publish/
+browser-extension/offscreen/_framework/
+
 # Claude Code local session/tool state — settings.local.json stays local; these two shared
 # project artifacts (frontend-designer subagent + skill) are tracked so they follow the repo.
 .claude/*

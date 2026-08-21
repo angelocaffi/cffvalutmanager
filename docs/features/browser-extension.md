@@ -37,4 +37,25 @@ Popup minimale (icona nella toolbar del browser): stato sessione in alto, prompt
 
 ## Stato
 
-Non pianificata in dettaglio. Nessun design di sicurezza approvato, nessun codice, nessuna decisione presa sui punti aperti sopra. Da riprendere con un piano dedicato quando si decide di avviarla.
+- **Fase 1/2 (fatto)**: design di sicurezza approvato e documentato, host crypto offscreen
+  (`src/CffVaultManager.Extension.CryptoHost`) — Blazor WASM minimale senza UI che riferisce
+  `CffVaultManager.Crypto` direttamente.
+- **Fase 3 (fatto)**: scheletro estensione in `browser-extension/` — `manifest.json` (Manifest V3,
+  `key` pinnata → id estensione `ggflohkjkhokbbknoallojkhkhllbljd`, stabile tra caricamento non
+  pacchettizzato ed eventuale pubblicazione), `background.js` (ciclo di vita del documento
+  offscreen via `chrome.offscreen`), `offscreen/offscreen.html` + `offscreen-bridge.js` (bridge
+  JS↔`[JSInvokable]`), popup di test usa e getta. Verificato dal vivo in Chrome: round-trip reale
+  Encrypt/Decrypt attraverso `CryptoInterop`, non solo un ping JS.
+  - `browser-extension/build.ps1` pubblica `CffVaultManager.Extension.CryptoHost` e copia
+    `_framework/` dentro `offscreen/` (non committato, generato — vedi `.gitignore`); da eseguire
+    prima di caricare l'estensione e ogni volta che `CffVaultManager.Crypto` cambia.
+  - Nota manifest V3: `content_security_policy.extension_pages` deve includere esplicitamente
+    `'wasm-unsafe-eval'` (non è nel CSP di default delle pagine estensione) — senza, il boot di
+    Blazor WASM nel documento offscreen si blocca silenziosamente. Scoperto e corretto durante la
+    verifica dal vivo di questa fase.
+  - La chiave privata usata per generare la `key` pinnata non è stata conservata (non serve né per
+    il caricamento non pacchettizzato né per la pubblicazione sul Chrome Web Store, che può
+    comunque forzare lo stesso id se necessario tramite lo stesso meccanismo).
+- **Prossimo (fase 4)**: popup login reale (email/master password → prelogin/login contro l'Api di
+  sviluppo → DEK sbloccata in memoria del service worker), al posto del popup di test attuale.
+- Nessuna decisione presa su v2 (autofill).

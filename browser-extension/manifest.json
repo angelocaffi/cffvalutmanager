@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "CffVault",
+  "short_name": "CffVault",
+  "version": "0.1.0",
+  "description": "Salva le credenziali nel tuo vault CffVault dopo un login riuscito.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw0zbVe36lpU0Hcr4rO15tEALlF/ooh2ZctGoEaXXfnE1V1kd2V2o4alJP/XQFHJouVlaWRVO19UMTxWXpJZ5J/nYPSL9+c9jWlupb9jbzpdMG4SgBYd1xcNaHNtUkExeCZIl6O/xT3cnfmz+PERvwSSmHsTWgK5fLq5hBE6MjAR1QP3PXW0/bLATG+rVWTk4bo1x5u9gif1yokTldldjzmnEcXQ20qz4yx6trXl8qFsSsqIMIPra5Epowu+PUmJfQaILA/m3bWR+UIXIQpp8oewboYxKTj8Dcq+0IR0mpIKbUOzy3Uv2Wahu9y/vUps/gg30pc9J6yZYAbVj2v7x8wIDAQAB",
+  "permissions": ["offscreen"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "CffVault"
+  }
+}
